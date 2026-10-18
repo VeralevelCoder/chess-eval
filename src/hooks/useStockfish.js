@@ -59,6 +59,16 @@ export default function useStockfish() {
 
         const currentTurn = turnRef.current; // 'w' or 'b'
 
+        let bestMoveFromPv = currentEvalRef.current.bestMove;
+        let pvStr = currentEvalRef.current.pv;
+        if (pvMatch) {
+          pvStr = pvMatch[1].trim();
+          const firstMove = pvStr.split(/\s+/)[0];
+          if (firstMove && firstMove.length >= 4 && firstMove !== '(none)') {
+            bestMoveFromPv = firstMove;
+          }
+        }
+
         if (cpMatch) {
           const rawCp = parseInt(cpMatch[1], 10);
           // Stockfish score is from perspective of side to move. Convert to White's perspective:
@@ -71,8 +81,8 @@ export default function useStockfish() {
             value: whiteCp,
             scoreText: scoreFormatted,
             depth,
-            bestMove: currentEvalRef.current.bestMove,
-            pv: pvMatch ? pvMatch[1] : currentEvalRef.current.pv,
+            bestMove: bestMoveFromPv,
+            pv: pvStr,
           };
           currentEvalRef.current = updated;
           setEvaluation(updated);
@@ -86,8 +96,8 @@ export default function useStockfish() {
             value: whiteMate > 0 ? 10000 - whiteMate : -10000 - whiteMate,
             scoreText: scoreFormatted,
             depth,
-            bestMove: currentEvalRef.current.bestMove,
-            pv: pvMatch ? pvMatch[1] : currentEvalRef.current.pv,
+            bestMove: bestMoveFromPv,
+            pv: pvStr,
           };
           currentEvalRef.current = updated;
           setEvaluation(updated);
@@ -96,7 +106,8 @@ export default function useStockfish() {
 
       if (line.startsWith('bestmove')) {
         const parts = line.split(' ');
-        const bestMove = parts[1] || '';
+        const rawBest = parts[1] || '';
+        const bestMove = (rawBest && rawBest !== '(none)') ? rawBest : (currentEvalRef.current.bestMove || '');
         const finalEval = {
           ...currentEvalRef.current,
           bestMove,
@@ -132,6 +143,14 @@ export default function useStockfish() {
     const parts = fen.split(' ');
     turnRef.current = parts[1] || 'w';
 
+    const fresh = {
+      ...currentEvalRef.current,
+      bestMove: '',
+      pv: '',
+    };
+    currentEvalRef.current = fresh;
+    setEvaluation(fresh);
+
     setEvaluating(true);
     workerRef.current.postMessage('stop');
     workerRef.current.postMessage(`position fen ${fen}`);
@@ -147,12 +166,20 @@ export default function useStockfish() {
           scoreText: '0.00',
           depth: 0,
           bestMove: '',
+          pv: '',
         });
         return;
       }
 
       const parts = fen.split(' ');
       turnRef.current = parts[1] || 'w';
+
+      const fresh = {
+        ...currentEvalRef.current,
+        bestMove: '',
+        pv: '',
+      };
+      currentEvalRef.current = fresh;
 
       pendingResolveRef.current = resolve;
       setEvaluating(true);

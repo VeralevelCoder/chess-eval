@@ -242,6 +242,76 @@ function getGameTermination(gameHeaders, moves, finalFen) {
   return null;
 }
 
+// Convert UCI move (e.g. "e2e4", "g1f3", "e7e8q") to SAN (e.g. "e4", "Nf3", "e8=Q")
+function uciToSan(fen, uci) {
+  if (!fen || !uci || uci.length < 4) return uci || '';
+  try {
+    const c = new Chess(fen);
+    const from = uci.slice(0, 2);
+    const to = uci.slice(2, 4);
+    const promotion = uci.length > 4 ? uci.slice(4, 5) : undefined;
+    const moveRes = c.move({ from, to, promotion });
+    return moveRes ? moveRes.san : uci;
+  } catch {
+    return uci;
+  }
+}
+
+// Convert PV (Principal Variation) string into an array of readable moves with FENs
+function pvToSanList(fen, pvString, maxMoves = 6) {
+  if (!fen || !pvString) return [];
+  try {
+    const c = new Chess(fen);
+    const tokens = pvString.trim().split(/\s+/).slice(0, maxMoves);
+    const result = [];
+    for (let uci of tokens) {
+      if (uci.length < 4) break;
+      const from = uci.slice(0, 2);
+      const to = uci.slice(2, 4);
+      const promotion = uci.length > 4 ? uci.slice(4, 5) : undefined;
+      const turn = c.turn();
+      const moveNum = c.moveNumber ? c.moveNumber() : Math.floor(c.history().length / 2) + 1;
+      const moveRes = c.move({ from, to, promotion });
+      if (!moveRes) break;
+      result.push({
+        san: moveRes.san,
+        uci,
+        from,
+        to,
+        turn,
+        moveNum,
+        fenAfter: c.fen(),
+      });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+// Apply a UCI move to a FEN position and return the resulting FEN & details
+function applyUciMove(fen, uci) {
+  if (!fen || !uci || uci.length < 4) return null;
+  try {
+    const c = new Chess(fen);
+    const from = uci.slice(0, 2);
+    const to = uci.slice(2, 4);
+    const promotion = uci.length > 4 ? uci.slice(4, 5) : undefined;
+    const moveRes = c.move({ from, to, promotion });
+    if (moveRes) {
+      return {
+        fen: c.fen(),
+        san: moveRes.san,
+        from,
+        to,
+        piece: moveRes.piece,
+        color: moveRes.color,
+      };
+    }
+  } catch {}
+  return null;
+}
+
 // Generate contextual commentary explaining how well or bad the move was
 function generateCommentary(move, prevEval, currEval, classification, playerName, isLastMove = false, gameTermination = null) {
   if (!move) {
@@ -305,7 +375,8 @@ function generateCommentary(move, prevEval, currEval, classification, playerName
   const isCapture = san.includes('x');
   const isCheck = san.includes('+');
   const isCastle = san.includes('O-O');
-  const bestAlt = currEval.bestMove ? `Stockfish suggests ${currEval.bestMove} as the top follow-up.` : '';
+  const bestAltSan = currEval.bestMove ? uciToSan(move.fen, currEval.bestMove) : '';
+  const bestAlt = bestAltSan ? `Stockfish suggests ${bestAltSan} as the top follow-up.` : '';
 
   // Centipawns lost from moving player's perspective
   const evalDiff = currEval.value - prevEval.value;
@@ -406,6 +477,13 @@ export default function ChessAnalyzer({
   const [analyzerLinkInput, setAnalyzerLinkInput] = useState('');
   const [analyzerLinkLoading, setAnalyzerLinkLoading] = useState(false);
   const [analyzerLinkError, setAnalyzerLinkError] = useState('');
+
+  // Guide lines and visual suggestion states
+  const [showGuideLines, setShowGuideLines] = useState(true);
+  const [showBestMoveArrow, setShowBestMoveArrow] = useState(true);
+  const [showPlayedMoveArrow, setShowPlayedMoveArrow] = useState(true);
+  const [showAlternativeArrow, setShowAlternativeArrow] = useState(true);
+  const [previewState, setPreviewState] = useState(null); // { fen, moveSan, from, to, description }
 
   const { isReady, evaluating, evaluation, evaluatePosition, evaluatePositionAsync, stop } = useStockfish();
 
@@ -675,6 +753,252 @@ export default function ChessAnalyzer({
     icon: '⏳',
   };
 
+  // Best move for current position
+  const currentBestMove = useMemo(() => {
+    if (!activeEval || !activeEval.bestMove || activeEval.bestMove.length < 4 || activeEval.bestMove === '(none)') {
+      return null;
+    }
+    const uci = activeEval.bestMove;
+    const from = uci.slice(0, 2);
+    const to = uci.slice(2, 4);
+    const san = uciToSan(currentFen, uci);
+    return {
+      uci,
+      from,
+      to,
+      san,
+      applied: applyUciMove(currentFen, uci),
+    };
+  }, [activeEval, currentFen]);
+
+  // Continuation line (PV) in SAN
+  const currentContinuation = useMemo(() => {
+    if (!activeEval || !activeEval.pv) return [];
+    return pvToSanList(currentFen, activeEval.pv, 6);
+  }, [activeEval, currentFen]);
+
+  // What was best instead of the current move (if current move was a mistake/blunder/inaccuracy)
+  const previousAlternative = useMemo(() => {
+    if (currentMoveIndex === 0) return null;
+    const isError = ['inaccuracy', 'mistake', 'blunder'].includes(currentClassification?.type);
+    if (!isError) return null;
+
+    const prevFen = currentMoveIndex > 1 ? moves[currentMoveIndex - 2]?.fen : START_FEN;
+    const prevEval = evalCache[currentMoveIndex - 1];
+    if (!prevEval || !prevEval.bestMove || prevEval.bestMove.length < 4 || prevEval.bestMove === '(none)') {
+      return null;
+    }
+
+    const uci = prevEval.bestMove;
+    const playedMove = moves[currentMoveIndex - 1];
+    if (playedMove && (playedMove.from + playedMove.to) === uci.slice(0, 4)) {
+      return null;
+    }
+
+    const from = uci.slice(0, 2);
+    const to = uci.slice(2, 4);
+    const san = uciToSan(prevFen, uci);
+    return {
+      uci,
+      from,
+      to,
+      san,
+      fenBefore: prevFen,
+      applied: applyUciMove(prevFen, uci),
+    };
+  }, [currentMoveIndex, moves, currentClassification, evalCache]);
+
+  // Guide lines arrows on the chessboard
+  const boardArrows = useMemo(() => {
+    if (!showGuideLines) return [];
+
+    // If currently previewing a move, draw arrow for that move
+    if (previewState && previewState.from && previewState.to) {
+      return [
+        {
+          startSquare: previewState.from,
+          endSquare: previewState.to,
+          color: '#10b981',
+        },
+      ];
+    }
+
+    const arrows = [];
+
+    // 1. Played move arrow
+    if (showPlayedMoveArrow && currentMoveIndex > 0 && moves[currentMoveIndex - 1]) {
+      const move = moves[currentMoveIndex - 1];
+      const cls = currentClassification?.type;
+      let color = '#3b82f6';
+      if (cls === 'best' || cls === 'excellent' || cls === 'checkmate') {
+        color = '#10b981';
+      } else if (cls === 'inaccuracy') {
+        color = '#f59e0b';
+      } else if (cls === 'mistake') {
+        color = '#f97316';
+      } else if (cls === 'blunder') {
+        color = '#ef4444';
+      }
+      arrows.push({
+        startSquare: move.from,
+        endSquare: move.to,
+        color,
+      });
+    }
+
+    // 2. Best move suggestion arrow for current position
+    if (showBestMoveArrow && currentBestMove && currentBestMove.from && currentBestMove.to) {
+      if (/^[a-h][1-8]$/.test(currentBestMove.from) && /^[a-h][1-8]$/.test(currentBestMove.to)) {
+        arrows.push({
+          startSquare: currentBestMove.from,
+          endSquare: currentBestMove.to,
+          color: '#10b981',
+        });
+      }
+    }
+
+    // 3. Alternative arrow for mistakes (what should have been played)
+    if (showAlternativeArrow && previousAlternative && previousAlternative.from && previousAlternative.to) {
+      if (/^[a-h][1-8]$/.test(previousAlternative.from) && /^[a-h][1-8]$/.test(previousAlternative.to)) {
+        arrows.push({
+          startSquare: previousAlternative.from,
+          endSquare: previousAlternative.to,
+          color: '#06b6d4',
+        });
+      }
+    }
+
+    return arrows;
+  }, [
+    showGuideLines,
+    showPlayedMoveArrow,
+    showBestMoveArrow,
+    showAlternativeArrow,
+    currentMoveIndex,
+    moves,
+    currentClassification,
+    currentBestMove,
+    previousAlternative,
+    previewState,
+  ]);
+
+  // Square highlighting for played moves and best move suggestions
+  const boardSquareStyles = useMemo(() => {
+    const styles = {};
+    if (!showGuideLines) return styles;
+
+    if (previewState) {
+      if (previewState.from) {
+        styles[previewState.from] = { backgroundColor: 'rgba(16, 185, 129, 0.25)' };
+      }
+      if (previewState.to) {
+        styles[previewState.to] = {
+          backgroundColor: 'rgba(16, 185, 129, 0.35)',
+          boxShadow: 'inset 0 0 0 2px #10b981',
+        };
+      }
+      return styles;
+    }
+
+    // Highlight played move squares
+    if (showPlayedMoveArrow && currentMoveIndex > 0 && moves[currentMoveIndex - 1]) {
+      const move = moves[currentMoveIndex - 1];
+      const cls = currentClassification?.type;
+      let bg = 'rgba(59, 130, 246, 0.2)';
+      if (cls === 'blunder') bg = 'rgba(239, 68, 68, 0.25)';
+      else if (cls === 'mistake') bg = 'rgba(249, 115, 22, 0.25)';
+      else if (cls === 'inaccuracy') bg = 'rgba(245, 158, 11, 0.2)';
+      else if (cls === 'best' || cls === 'excellent') bg = 'rgba(16, 185, 129, 0.2)';
+
+      styles[move.from] = { backgroundColor: bg };
+      styles[move.to] = { backgroundColor: bg };
+    }
+
+    // Highlight best move squares
+    if (showBestMoveArrow && currentBestMove) {
+      const { from, to } = currentBestMove;
+      if (/^[a-h][1-8]$/.test(from) && /^[a-h][1-8]$/.test(to)) {
+        styles[from] = {
+          ...(styles[from] || {}),
+          boxShadow: 'inset 0 0 0 2px #10b981',
+        };
+        styles[to] = {
+          ...(styles[to] || {}),
+          backgroundColor: 'rgba(16, 185, 129, 0.28)',
+          boxShadow: 'inset 0 0 0 2px #10b981',
+        };
+      }
+    }
+
+    // Highlight alternative squares if mistake
+    if (showAlternativeArrow && previousAlternative) {
+      const { from, to } = previousAlternative;
+      if (/^[a-h][1-8]$/.test(from) && /^[a-h][1-8]$/.test(to)) {
+        styles[from] = {
+          ...(styles[from] || {}),
+          boxShadow: 'inset 0 0 0 2px #06b6d4',
+        };
+        styles[to] = {
+          ...(styles[to] || {}),
+          backgroundColor: 'rgba(6, 182, 212, 0.25)',
+          boxShadow: 'inset 0 0 0 2px #06b6d4',
+        };
+      }
+    }
+
+    return styles;
+  }, [
+    showGuideLines,
+    showPlayedMoveArrow,
+    showBestMoveArrow,
+    showAlternativeArrow,
+    currentMoveIndex,
+    moves,
+    currentClassification,
+    currentBestMove,
+    previousAlternative,
+    previewState,
+  ]);
+
+  // Preview handlers
+  const handlePreviewBestMove = () => {
+    if (!currentBestMove || !currentBestMove.applied) return;
+    setPreviewState({
+      fen: currentBestMove.applied.fen,
+      moveSan: currentBestMove.san,
+      from: currentBestMove.from,
+      to: currentBestMove.to,
+      description: `Best Move: ${currentBestMove.san}`,
+    });
+  };
+
+  const handlePreviewAlternative = () => {
+    if (!previousAlternative || !previousAlternative.applied) return;
+    setPreviewState({
+      fen: previousAlternative.applied.fen,
+      moveSan: previousAlternative.san,
+      from: previousAlternative.from,
+      to: previousAlternative.to,
+      description: `Alternative for move ${moves[currentMoveIndex - 1]?.moveNumber}: ${previousAlternative.san}`,
+    });
+  };
+
+  const handlePreviewContinuation = (step) => {
+    if (!step) return;
+    setPreviewState({
+      fen: step.fenAfter,
+      moveSan: step.san,
+      from: step.from,
+      to: step.to,
+      description: `Line step: ${step.turn === 'w' ? step.moveNum + '.' : step.moveNum + '...'} ${step.san}`,
+    });
+  };
+
+  // Clear preview state whenever current move index changes
+  useEffect(() => {
+    setPreviewState(null);
+  }, [currentMoveIndex]);
+
   // Full Game Auto-Analysis
   const runFullGameAnalysis = async () => {
     if (!isReady || moves.length === 0) return;
@@ -938,8 +1262,28 @@ export default function ChessAnalyzer({
 
       {/* Main Grid: Board & Navigation vs Analysis, Move List & Imports */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Board + Eval Bar + Navigation + Move Commentary (7 cols) */}
+        {/* Left Column: Board + Eval Bar + Navigation + Move Commentary + Visual Suggestions (7 cols) */}
         <div className="lg:col-span-7 flex flex-col items-center">
+          {/* Active Move Preview Banner */}
+          {previewState && (
+            <div className="w-full max-w-[500px] mb-3 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-700 flex items-center justify-between gap-2 shadow-xs transition-all">
+              <div className="flex items-center gap-2 text-xs text-emerald-900 dark:text-emerald-200">
+                <span className="text-base">👀</span>
+                <span>
+                  Previewing: <strong className="font-bold underline decoration-emerald-500">{previewState.description}</strong>
+                </span>
+              </div>
+              <button
+                onClick={() => setPreviewState(null)}
+                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors flex items-center gap-1"
+                title="Return to actual game position"
+              >
+                <span>✕</span>
+                <span>Exit Preview</span>
+              </button>
+            </div>
+          )}
+
           {/* Board + Eval Bar container */}
           <div className="flex items-stretch gap-3 w-full max-w-[500px]">
             {/* Vertical Eval Bar */}
@@ -957,13 +1301,20 @@ export default function ChessAnalyzer({
             <div className="flex-1 aspect-square rounded-lg overflow-hidden shadow-md border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900">
               <Chessboard
                 options={{
-                  position: currentFen,
+                  position: previewState ? previewState.fen : currentFen,
                   boardOrientation: boardOrientation,
                   allowDragging: false,
                   showAnimations: true,
                   animationDurationInMs: 250,
                   boardStyle: {
                     borderRadius: '8px',
+                  },
+                  arrows: boardArrows,
+                  squareStyles: boardSquareStyles,
+                  allowDrawingArrows: true,
+                  arrowOptions: {
+                    arrowWidthDenominator: 6,
+                    opacity: 0.75,
                   },
                 }}
               />
@@ -1023,6 +1374,77 @@ export default function ChessAnalyzer({
             >
               Next Blunder ⏩
             </button>
+          </div>
+
+          {/* Guide Lines & Visual Suggestions Toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-3 w-full max-w-[500px] p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-xs transition-colors">
+            <div className="flex items-center gap-1.5 font-bold text-zinc-700 dark:text-zinc-300">
+              <span>🎯</span>
+              <span className="text-[11px] uppercase tracking-wider">Guide Lines:</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={() => setShowGuideLines((prev) => !prev)}
+                className={`px-2 py-0.5 rounded text-[11px] font-semibold border transition-colors ${
+                  showGuideLines
+                    ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                    : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500'
+                }`}
+                title="Toggle all board guide lines and arrows"
+              >
+                {showGuideLines ? 'Visible' : 'Hidden'}
+              </button>
+
+              {showGuideLines && (
+                <>
+                  <button
+                    onClick={() => setShowBestMoveArrow((prev) => !prev)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors ${
+                      showBestMoveArrow
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
+                    }`}
+                    title="Toggle green best move recommendation arrow"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span>Best Move</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowPlayedMoveArrow((prev) => !prev)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors ${
+                      showPlayedMoveArrow
+                        ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                        : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
+                    }`}
+                    title="Toggle played move trail arrow"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                    <span>Played</span>
+                  </button>
+
+                  {previousAlternative && (
+                    <button
+                      onClick={() => setShowAlternativeArrow((prev) => !prev)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors ${
+                        showAlternativeArrow
+                          ? 'bg-cyan-50 dark:bg-cyan-950/50 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300'
+                          : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
+                      }`}
+                      title="Toggle cyan alternative arrow for what should have been played"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-cyan-500" />
+                      <span>Alternative</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="w-full max-w-[500px] text-[10px] text-zinc-400 dark:text-zinc-500 text-center mt-1">
+            Tip: Right-click and drag on the board to draw your own custom guide arrows.
           </div>
 
           {/* Move Evaluation & Commentary Card */}
@@ -1088,6 +1510,103 @@ export default function ChessAnalyzer({
                   </span>
                 )}
                 <span>Depth {activeEval?.depth || 0}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Visual Best Move Suggestion & Guide Lines Card */}
+          <div className="mt-4 w-full max-w-[500px] p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm transition-colors flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
+                <span>💡</span>
+                <span>Best Move & Guide Line</span>
+              </span>
+              {activeEval?.bestMove && activeEval.bestMove !== '(none)' && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  Stockfish Suggestion
+                </span>
+              )}
+            </div>
+
+            {/* Error Alternative (if current move was a blunder/mistake/inaccuracy) */}
+            {previousAlternative && (
+              <div className="p-3 rounded-lg border border-cyan-200 dark:border-cyan-900/60 bg-cyan-50/70 dark:bg-cyan-950/30 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-cyan-900 dark:text-cyan-200 flex items-center gap-1.5">
+                    <span>💡</span> Better Alternative for Move {moves[currentMoveIndex - 1]?.moveNumber}:
+                  </span>
+                  <span className="font-mono font-extrabold text-sm text-cyan-700 dark:text-cyan-300">
+                    {previousAlternative.san}
+                  </span>
+                </div>
+                <div className="text-xs text-cyan-800/90 dark:text-cyan-300/90 leading-relaxed">
+                  Instead of {moves[currentMoveIndex - 1]?.san} ({currentClassification.label}), playing <strong>{previousAlternative.san}</strong> was recommended by Stockfish.
+                </div>
+                <button
+                  onClick={handlePreviewAlternative}
+                  disabled={previewState?.moveSan === previousAlternative.san}
+                  className="self-start px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5"
+                >
+                  <span>👀</span>
+                  <span>{previewState?.moveSan === previousAlternative.san ? 'Previewing Alternative' : `Preview ${previousAlternative.san} on Board`}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Next Recommended Best Move */}
+            {currentBestMove ? (
+              <div className="p-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/50 flex flex-col gap-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                      Best Move for {currentFen.split(' ')[1] === 'w' ? 'White' : 'Black'}:
+                    </span>
+                    <strong className="font-mono text-base font-extrabold text-emerald-600 dark:text-emerald-400">
+                      {currentBestMove.san}
+                    </strong>
+                  </div>
+                  <button
+                    onClick={handlePreviewBestMove}
+                    disabled={previewState?.moveSan === currentBestMove.san}
+                    className="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5"
+                  >
+                    <span>👀</span>
+                    <span>{previewState?.moveSan === currentBestMove.san ? 'Previewing' : 'Preview Move'}</span>
+                  </button>
+                </div>
+
+                {/* Continuation / PV Sequence */}
+                {currentContinuation.length > 0 && (
+                  <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800/80 flex flex-col gap-1.5">
+                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                      Guide Line Continuation:
+                    </span>
+                    <div className="flex items-center gap-1 flex-wrap font-mono text-xs">
+                      {currentContinuation.map((step, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handlePreviewContinuation(step)}
+                          className={`px-2 py-0.5 rounded border transition-colors ${
+                            previewState?.moveSan === step.san
+                              ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                              : 'bg-white dark:bg-zinc-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200'
+                          }`}
+                          title={`Click to preview position after ${step.san}`}
+                        >
+                          {step.turn === 'w' && <span className="opacity-60 mr-0.5">{step.moveNum}.</span>}
+                          <span>{step.san}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-3 text-xs text-zinc-500 dark:text-zinc-400 text-center italic">
+                {currentMoveIndex === moves.length && gameTermination
+                  ? 'Game concluded — no further legal moves.'
+                  : 'Evaluating best move suggestions...'}
               </div>
             )}
           </div>
