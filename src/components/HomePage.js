@@ -24,27 +24,75 @@ const KASPAROV_PGN = `[Event "Hoogovens A Tournament"]
 1. e4 d6 2. d4 Nf6 3. Nc3 g6 4. Be3 Bg7 5. Qd2 c6 6. f3 b5 7. Nge2 Nbd7 8. Bh6 Bxh6 9. Qxh6 Bb7 10. a3 e5 11. O-O-O Qe7 12. Kb1 a6 13. Nc1 O-O-O 14. Nb3 exd4 15. Rxd4 c5 16. Rd1 Nb6 17. g3 Kb8 18. Na5 Ba8 19. Bh3 d5 20. Qf4+ Ka7 21. Rhe1 d4 22. Nd5 Nbxd5 23. exd5 Qd6 24. Rxd4 cxd4 25. Re7+ Kb6 26. Qxd4+ Kxa5 27. b4+ Ka4 28. Qc3 Qxd5 29. Ra7 Bb7 30. Rxb7 Qc4 31. Qxf6 Kxa3 32. Qxa6+ Kxb4 33. c3+ Kxc3 34. Qa1+ Kd2 35. Qb2+ Kd1 36. Bf1 Rd2 37. Rd7 Rxd7 38. Bxc4 bxc4 39. Qxh8 Rd3 40. Qa8 c3 41. Qa4+ Ke1 42. f4 f5 43. Kc1 Rd2 44. Qa7 1-0`;
 
 export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
-  const [activeTab, setActiveTab] = useState('chesscom'); // 'chesscom' | 'pgn'
+  // Tabs: 'link' | 'username' | 'pgn'
+  const [activeTab, setActiveTab] = useState('link');
+
+  // Tab 1: Game link / share text
+  const [gameLinkInput, setGameLinkInput] = useState('');
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkError, setLinkError] = useState('');
+
+  // Tab 2: Username search
   const [username, setUsername] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [userLoading, setUserLoading] = useState(false);
   const [games, setGames] = useState([]);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [userError, setUserError] = useState('');
 
+  // Tab 3: Raw PGN
   const [customPgn, setCustomPgn] = useState('');
   const [pgnError, setPgnError] = useState('');
 
-  // Fetch Chess.com games
-  const handleFetchGames = async (isLoadMore = false) => {
-    const user = username.trim();
-    if (!user) {
-      setErrorMsg('Please enter a Chess.com username');
+  // Handle Game Link / Share Text Fetch
+  const handleFetchFromLink = async () => {
+    const text = gameLinkInput.trim();
+    if (!text) {
+      setLinkError('Please enter or paste a Chess.com game link or share text.');
       return;
     }
 
-    setLoading(true);
-    setErrorMsg('');
+    setLinkLoading(true);
+    setLinkError('');
+
+    try {
+      const res = await fetch('/api/chesscom/game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: text }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setLinkError(data.error || 'Failed to retrieve game from Chess.com');
+        setLinkLoading(false);
+        return;
+      }
+
+      if (data.pgn) {
+        onSelectGame(data.pgn, data.title || 'Chess.com Game');
+      } else {
+        setLinkError('No move notation could be loaded for this game.');
+      }
+    } catch (err) {
+      console.error(err);
+      setLinkError('Network error while connecting to Chess.com');
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  // Fetch games by Username
+  const handleFetchGames = async (isLoadMore = false) => {
+    const user = username.trim();
+    if (!user) {
+      setUserError('Please enter a Chess.com username');
+      return;
+    }
+
+    setUserLoading(true);
+    setUserError('');
 
     try {
       const offset = isLoadMore ? nextOffset : 0;
@@ -52,8 +100,8 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
       const data = await res.json();
 
       if (!res.ok) {
-        setErrorMsg(data.error || 'Failed to fetch games from Chess.com');
-        setLoading(false);
+        setUserError(data.error || 'Failed to fetch games from Chess.com');
+        setUserLoading(false);
         return;
       }
 
@@ -62,7 +110,7 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
       } else {
         setGames(data.games || []);
         if (data.games && data.games.length === 0) {
-          setErrorMsg(`No recent games found for "${user}".`);
+          setUserError(`No recent games found for "${user}".`);
         }
       }
 
@@ -70,9 +118,9 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
       setNextOffset(data.nextOffset);
     } catch (err) {
       console.error(err);
-      setErrorMsg('Network error while connecting to Chess.com');
+      setUserError('Network error while connecting to Chess.com');
     } finally {
-      setLoading(false);
+      setUserLoading(false);
     }
   };
 
@@ -98,6 +146,12 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
       setPgnError('Please paste or upload a PGN first.');
       return;
     }
+    // If user pasted a Chess.com URL into the PGN box, route it smartly to the link fetcher!
+    if (customPgn.includes('chess.com/game') || customPgn.includes('chess.com/live')) {
+      setGameLinkInput(customPgn);
+      setActiveTab('link');
+      return;
+    }
     onSelectGame(customPgn, 'Custom PGN');
   };
 
@@ -117,7 +171,7 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
 
         <button
           onClick={toggleDarkMode}
-          className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5"
+          className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 text-xs font-semibold shadow-xs transition-colors flex items-center gap-1.5"
           title={isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
         >
           {isDark ? (
@@ -138,20 +192,20 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
           Analyze Any Chess Game
         </h1>
         <p className="text-sm sm:text-base text-zinc-600 dark:text-zinc-400 max-w-xl mx-auto">
-          Enter a Chess.com username to import your recent matches, or paste any PGN to get
+          Paste any Chess.com game link, search a profile, or load a PGN to get
           deep client-side Stockfish evaluation, move commentary, and blunder detection.
         </p>
 
         {/* Feature Pills */}
         <div className="flex flex-wrap items-center justify-center gap-2 mt-5 text-xs text-zinc-600 dark:text-zinc-400">
           <span className="px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center gap-1">
-            ⚡ 100% Free Client-Side Engine
+            ⚡ 100% Client-Side Engine
           </span>
           <span className="px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center gap-1">
             🚨 Instant Blunder Alerts
           </span>
           <span className="px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center gap-1">
-            📊 Move-by-Move Commentary
+            📊 Natural Move Commentary
           </span>
         </div>
       </div>
@@ -161,29 +215,92 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
         {/* Method Switcher Tabs */}
         <div className="flex border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40">
           <button
-            onClick={() => setActiveTab('chesscom')}
-            className={`flex-1 py-3.5 text-center text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${
-              activeTab === 'chesscom'
+            onClick={() => setActiveTab('link')}
+            className={`flex-1 py-3.5 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+              activeTab === 'link'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-zinc-900'
                 : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
             }`}
           >
-            <span>♟️</span> Import from Chess.com
+            <span>🔗</span> Paste Game Link
+          </button>
+          <button
+            onClick={() => setActiveTab('username')}
+            className={`flex-1 py-3.5 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+              activeTab === 'username'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-zinc-900'
+                : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+            }`}
+          >
+            <span>♟️</span> Chess.com Profile
           </button>
           <button
             onClick={() => setActiveTab('pgn')}
-            className={`flex-1 py-3.5 text-center text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-2 ${
+            className={`flex-1 py-3.5 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
               activeTab === 'pgn'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-zinc-900'
                 : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
             }`}
           >
-            <span>📝</span> Paste or Upload PGN
+            <span>📝</span> Paste / Upload PGN
           </button>
         </div>
 
-        {/* Tab 1 Content: Chess.com Profile Import */}
-        {activeTab === 'chesscom' && (
+        {/* TAB 1: Direct Game Link / Share Text */}
+        {activeTab === 'link' && (
+          <div className="p-6">
+            <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100 mb-1">
+              Direct Game Link or Share Text
+            </h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">
+              Paste the share text or link from Chess.com to immediately import and analyze the game.
+            </p>
+
+            <div className="flex flex-col gap-3">
+              <input
+                type="text"
+                value={gameLinkInput}
+                onChange={(e) => {
+                  setGameLinkInput(e.target.value);
+                  setLinkError('');
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && handleFetchFromLink()}
+                placeholder="e.g. Check out this #chess game: veralevelgamer vs vanshs40 - https://www.chess.com/game/live/185520318828"
+                className="w-full px-4 py-3 text-xs sm:text-sm border border-zinc-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 font-mono"
+              />
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                  Accepts full share text, game URLs (`/game/live/...`), or game IDs.
+                </span>
+
+                <button
+                  onClick={handleFetchFromLink}
+                  disabled={linkLoading}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {linkLoading ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Loading Game...</span>
+                    </>
+                  ) : (
+                    <span>Analyze Game Now →</span>
+                  )}
+                </button>
+              </div>
+
+              {linkError && (
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs font-medium">
+                  {linkError}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: Chess.com Username Profile Search */}
+        {activeTab === 'username' && (
           <div className="p-6">
             <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100 mb-1">
               Search Chess.com Profile
@@ -203,16 +320,16 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
               />
               <button
                 onClick={() => handleFetchGames(false)}
-                disabled={loading}
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5"
+                disabled={userLoading}
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
               >
-                {loading ? 'Fetching...' : 'Retrieve Games'}
+                {userLoading ? 'Fetching...' : 'Retrieve Games'}
               </button>
             </div>
 
-            {errorMsg && (
+            {userError && (
               <div className="p-3 mb-4 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs font-medium">
-                {errorMsg}
+                {userError}
               </div>
             )}
 
@@ -244,7 +361,7 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
 
                       <button
                         onClick={() => onSelectGame(game.pgn, `${game.white.username} vs ${game.black.username}`)}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors whitespace-nowrap self-start sm:self-auto"
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors whitespace-nowrap self-start sm:self-auto"
                       >
                         Analyze Game →
                       </button>
@@ -255,10 +372,10 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
                 {hasMore && (
                   <button
                     onClick={() => handleFetchGames(true)}
-                    disabled={loading}
+                    disabled={userLoading}
                     className="w-full py-2.5 mt-2 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-bold rounded-xl transition-colors"
                   >
-                    {loading ? 'Importing more...' : '⬇ Import 5 More Games'}
+                    {userLoading ? 'Importing more...' : '⬇ Import 5 More Games'}
                   </button>
                 )}
               </div>
@@ -266,7 +383,7 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
           </div>
         )}
 
-        {/* Tab 2 Content: Paste or Upload PGN */}
+        {/* TAB 3: Paste or Upload PGN */}
         {activeTab === 'pgn' && (
           <div className="p-6">
             <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100 mb-1">
@@ -301,7 +418,7 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
 
                 <button
                   onClick={handleLaunchPgn}
-                  className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors"
+                  className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors"
                 >
                   Start Analysis →
                 </button>
@@ -360,4 +477,3 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
     </div>
   );
 }
-

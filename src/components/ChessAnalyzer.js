@@ -229,6 +229,11 @@ export default function ChessAnalyzer({
   const [chesscomError, setChesscomError] = useState('');
   const [activeGameId, setActiveGameId] = useState('');
 
+  // Chess.com Direct Game Link States
+  const [analyzerLinkInput, setAnalyzerLinkInput] = useState('');
+  const [analyzerLinkLoading, setAnalyzerLinkLoading] = useState(false);
+  const [analyzerLinkError, setAnalyzerLinkError] = useState('');
+
   const { isReady, evaluating, evaluation, evaluatePosition, evaluatePositionAsync, stop } = useStockfish();
 
   // Dark mode initialization
@@ -264,8 +269,88 @@ export default function ChessAnalyzer({
     });
   };
 
+  // Handle Chess.com direct game link / share text
+  const handleFetchAnalyzerLink = useCallback(async (textToFetch) => {
+    const text = (textToFetch || analyzerLinkInput).trim();
+    if (!text) {
+      setAnalyzerLinkError('Please enter a Chess.com game link or share text.');
+      return;
+    }
+
+    setAnalyzerLinkLoading(true);
+    setAnalyzerLinkError('');
+
+    try {
+      const res = await fetch('/api/chesscom/game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: text }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setAnalyzerLinkError(data.error || 'Failed to retrieve game from Chess.com');
+        setAnalyzerLinkLoading(false);
+        return;
+      }
+
+      if (data.pgn) {
+        setPgnText(data.pgn);
+        // Direct parse
+        const chess = new Chess();
+        chess.loadPgn(data.pgn, { strict: false });
+        const headers = chess.header ? chess.header() : {};
+        setGameHeaders(headers);
+
+        const replay = new Chess();
+        const history = chess.history({ verbose: true });
+        const parsedMoves = [];
+
+        for (let i = 0; i < history.length; i++) {
+          const move = history[i];
+          replay.move(move);
+          parsedMoves.push({
+            san: move.san,
+            from: move.from,
+            to: move.to,
+            fen: replay.fen(),
+            moveNumber: Math.floor(i / 2) + 1,
+            isWhite: i % 2 === 0,
+            player: i % 2 === 0 ? 'White' : 'Black',
+          });
+        }
+
+        setMoves(parsedMoves);
+        setCurrentMoveIndex(0);
+        setEvalCache({});
+        setErrorMsg('');
+        setIsAnalyzingAll(false);
+        setActiveGameId(data.gameId);
+        setAnalyzerLinkInput('');
+      } else {
+        setAnalyzerLinkError('No move notation could be loaded for this game.');
+      }
+    } catch (err) {
+      console.error(err);
+      setAnalyzerLinkError('Network error while connecting to Chess.com');
+    } finally {
+      setAnalyzerLinkLoading(false);
+    }
+  }, [analyzerLinkInput]);
+
   // Parse a PGN string into game headers and move list with FENs
   const loadPgnString = useCallback((pgn, gameId = '') => {
+    const trimmed = (pgn || '').trim();
+    if (
+      trimmed.includes('chess.com/game') ||
+      trimmed.includes('chess.com/live') ||
+      trimmed.includes('chess.com/daily') ||
+      trimmed.includes('Check out this #chess game')
+    ) {
+      handleFetchAnalyzerLink(trimmed);
+      return;
+    }
+
     try {
       const chess = new Chess();
       chess.loadPgn(pgn, { strict: false });
@@ -302,7 +387,7 @@ export default function ChessAnalyzer({
       console.error('Failed to parse PGN:', err);
       setErrorMsg('Invalid PGN format. Please verify the move notation.');
     }
-  }, []);
+  }, [handleFetchAnalyzerLink]);
 
   // Initial load
   useEffect(() => {
@@ -963,10 +1048,20 @@ export default function ChessAnalyzer({
             </div>
           </div>
 
-          {/* Import Modes: Tabs for PGN input vs Chess.com Profile */}
+          {/* Import Modes: Tabs for Link vs PGN vs Chess.com Profile */}
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm flex flex-col gap-3 transition-colors">
             {/* Tabs Switcher */}
             <div className="flex border-b border-zinc-200 dark:border-zinc-800 pb-2 gap-2">
+              <button
+                onClick={() => setActiveTab('link')}
+                className={`pb-1 text-xs font-bold border-b-2 transition-colors ${
+                  activeTab === 'link'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                }`}
+              >
+                🔗 Link
+              </button>
               <button
                 onClick={() => setActiveTab('pgn')}
                 className={`pb-1 text-xs font-bold border-b-2 transition-colors ${
@@ -985,7 +1080,7 @@ export default function ChessAnalyzer({
                     : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
                 }`}
               >
-                <span>♟️ Chess.com Profile</span>
+                <span>♟️ Profile</span>
                 {chesscomGames.length > 0 && (
                   <span className="px-1.5 py-0.2 bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-full text-[10px]">
                     {chesscomGames.length}
@@ -993,6 +1088,41 @@ export default function ChessAnalyzer({
                 )}
               </button>
             </div>
+
+            {/* TAB 0: Direct Game Link */}
+            {activeTab === 'link' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    Chess.com Game Link / Share Text
+                  </label>
+                </div>
+
+                <input
+                  type="text"
+                  value={analyzerLinkInput}
+                  onChange={(e) => {
+                    setAnalyzerLinkInput(e.target.value);
+                    setAnalyzerLinkError('');
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleFetchAnalyzerLink()}
+                  placeholder="Paste URL (e.g. https://www.chess.com/game/live/185520318828)"
+                  className="w-full text-xs font-mono p-2.5 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950"
+                />
+
+                {analyzerLinkError && (
+                  <p className="text-xs text-red-600 dark:text-red-400 font-medium">{analyzerLinkError}</p>
+                )}
+
+                <button
+                  onClick={() => handleFetchAnalyzerLink()}
+                  disabled={analyzerLinkLoading}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {analyzerLinkLoading ? 'Loading Game...' : 'Analyze Game →'}
+                </button>
+              </div>
+            )}
 
             {/* TAB 1: PGN Text Input */}
             {activeTab === 'pgn' && (
