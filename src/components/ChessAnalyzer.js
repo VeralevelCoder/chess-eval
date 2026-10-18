@@ -99,8 +99,151 @@ function classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, bestMove, san
   }
 }
 
+// Determine how the game ended (win by resignation, win by checkmate, draw by stalemate, etc.)
+function getGameTermination(gameHeaders, moves, finalFen) {
+  const result = gameHeaders.Result || '*';
+  const termination = gameHeaders.Termination || '';
+  const white = gameHeaders.White || 'White';
+  const black = gameHeaders.Black || 'Black';
+
+  let isMate = false;
+  let isStalemate = false;
+  let isThreefold = false;
+  let isInsufficient = false;
+
+  if (finalFen) {
+    try {
+      const c = new Chess(finalFen);
+      isMate = c.isCheckmate();
+      isStalemate = c.isStalemate();
+      isThreefold = typeof c.isThreefoldRepetition === 'function' && c.isThreefoldRepetition();
+      isInsufficient = typeof c.isInsufficientMaterial === 'function' && c.isInsufficientMaterial();
+    } catch {}
+  }
+
+  const lastMove = moves && moves.length > 0 ? moves[moves.length - 1] : null;
+  if (lastMove && lastMove.san.includes('#')) {
+    isMate = true;
+  }
+
+  if (isMate) {
+    const winner = result === '1-0' ? white : result === '0-1' ? black : lastMove?.isWhite ? white : black;
+    const loser = winner === white ? black : white;
+    return {
+      type: 'checkmate',
+      title: `${winner} won by checkmate`,
+      badge: 'Win by Checkmate',
+      icon: '👑',
+      badgeClass: 'bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-700',
+      description: `${winner} delivered checkmate with ${lastMove?.san || 'the final move'}. ${loser}'s king is in check with no escape squares.`,
+    };
+  }
+
+  if (isStalemate) {
+    return {
+      type: 'stalemate',
+      title: 'Draw by stalemate',
+      badge: 'Draw by Stalemate',
+      icon: '🤝',
+      badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700',
+      description: 'The side to move has no legal moves and is not in check. The game ends in a draw by stalemate.',
+    };
+  }
+
+  if (isThreefold) {
+    return {
+      type: 'draw',
+      title: 'Draw by threefold repetition',
+      badge: 'Draw by Repetition',
+      icon: '🤝',
+      badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700',
+      description: 'The exact same position occurred three times. The game ends in a draw.',
+    };
+  }
+
+  if (isInsufficient) {
+    return {
+      type: 'draw',
+      title: 'Draw by insufficient material',
+      badge: 'Insufficient Material',
+      icon: '🤝',
+      badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700',
+      description: 'Neither player has enough pieces to force checkmate.',
+    };
+  }
+
+  const termLower = termination.toLowerCase();
+  if (termLower.includes('resignation') || termLower.includes('resigned')) {
+    const winner = result === '1-0' ? white : result === '0-1' ? black : white;
+    const loser = winner === white ? black : white;
+    return {
+      type: 'resignation',
+      title: `${winner} won by resignation`,
+      badge: 'Win by Resignation',
+      icon: '🏳️',
+      badgeClass: 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700',
+      description: `${loser} resigned the match after ${lastMove ? lastMove.san : 'the final move'}. ${winner} wins by resignation.`,
+    };
+  }
+
+  if (termLower.includes('time') || termLower.includes('timeout')) {
+    const winner = result === '1-0' ? white : result === '0-1' ? black : white;
+    const loser = winner === white ? black : white;
+    return {
+      type: 'timeout',
+      title: `${winner} won on time`,
+      badge: 'Win on Time',
+      icon: '⏱️',
+      badgeClass: 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700',
+      description: `${loser} ran out of time on the clock. ${winner} wins on time.`,
+    };
+  }
+
+  if (termLower.includes('agreement') || termLower.includes('agreed')) {
+    return {
+      type: 'draw',
+      title: 'Draw by mutual agreement',
+      badge: 'Draw by Agreement',
+      icon: '🤝',
+      badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700',
+      description: 'Both players agreed to a draw.',
+    };
+  }
+
+  if (result === '1-0') {
+    return {
+      type: 'win',
+      title: `${white} won (1-0)`,
+      badge: `${white} Won (1-0)`,
+      icon: '🏆',
+      badgeClass: 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700',
+      description: termination || `White (${white}) won the game.`,
+    };
+  } else if (result === '0-1') {
+    return {
+      type: 'win',
+      title: `${black} won (0-1)`,
+      badge: `${black} Won (0-1)`,
+      icon: '🏆',
+      badgeClass: 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700',
+      description: termination || `Black (${black}) won the game.`,
+    };
+  } else if (result === '1/2-1/2') {
+    return {
+      type: 'draw',
+      title: 'Draw (1/2-1/2)',
+      badge: 'Draw (1/2-1/2)',
+      icon: '🤝',
+      badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700',
+      description: termination || 'The match concluded in a draw.',
+    };
+  }
+
+  return null;
+}
+
 // Generate contextual commentary explaining how well or bad the move was
-function generateCommentary(move, prevEval, currEval, classification, playerName) {
+function generateCommentary(move, prevEval, currEval, classification, playerName, isLastMove = false, gameTermination = null) {
   if (!move) {
     return {
       headline: 'Game Start • Initial Position',
@@ -112,6 +255,36 @@ function generateCommentary(move, prevEval, currEval, classification, playerName
   const isWhite = move.isWhite;
   const who = playerName || (isWhite ? 'White' : 'Black');
   const opponent = isWhite ? 'Black' : 'White';
+
+  // Last Move with Game Conclusion
+  if (isLastMove && gameTermination) {
+    if (gameTermination.type === 'checkmate') {
+      return {
+        headline: `👑 Checkmate! ${who} delivers the final blow with ${san}`,
+        body: gameTermination.description,
+      };
+    } else if (gameTermination.type === 'resignation') {
+      return {
+        headline: `🏳️ ${who} played ${san} • ${gameTermination.title}`,
+        body: `Following ${san}, ${gameTermination.description}`,
+      };
+    } else if (gameTermination.type === 'stalemate') {
+      return {
+        headline: `🤝 Draw by Stalemate • ${san}`,
+        body: `Following ${san}, ${gameTermination.description}`,
+      };
+    } else if (gameTermination.type === 'timeout') {
+      return {
+        headline: `⏱️ ${gameTermination.title} • ${san}`,
+        body: `After ${san}, ${gameTermination.description}`,
+      };
+    } else if (gameTermination.type === 'draw') {
+      return {
+        headline: `🤝 ${gameTermination.title}`,
+        body: `After ${who} played ${san}, ${gameTermination.description}`,
+      };
+    }
+  }
 
   if (classification.type === 'checkmate') {
     return {
@@ -469,6 +642,17 @@ export default function ChessAnalyzer({
     return map;
   }, [moves, evalCache]);
 
+  // Final board FEN to analyze checkmate/stalemate/draw condition
+  const finalFen = useMemo(() => {
+    if (moves.length === 0) return START_FEN;
+    return moves[moves.length - 1].fen;
+  }, [moves]);
+
+  // Determine game termination / outcome (checkmate, resignation, stalemate, time, etc.)
+  const gameTermination = useMemo(() => {
+    return getGameTermination(gameHeaders, moves, finalFen);
+  }, [gameHeaders, moves, finalFen]);
+
   // Current move commentary
   const currentCommentary = useMemo(() => {
     if (currentMoveIndex === 0) {
@@ -479,9 +663,10 @@ export default function ChessAnalyzer({
     const currEval = evalCache[currentMoveIndex];
     const classification = moveClassifications[currentMoveIndex] || { type: 'evaluating', label: 'Analyzing' };
     const playerName = move.isWhite ? (gameHeaders.White || 'White') : (gameHeaders.Black || 'Black');
+    const isLastMove = currentMoveIndex === moves.length;
 
-    return generateCommentary(move, prevEval, currEval, classification, playerName);
-  }, [currentMoveIndex, moves, evalCache, activeEval, moveClassifications, gameHeaders]);
+    return generateCommentary(move, prevEval, currEval, classification, playerName, isLastMove, gameTermination);
+  }, [currentMoveIndex, moves, evalCache, activeEval, moveClassifications, gameHeaders, gameTermination]);
 
   const currentClassification = moveClassifications[currentMoveIndex] || {
     type: 'evaluating',
@@ -679,6 +864,15 @@ export default function ChessAnalyzer({
               {gameHeaders.Result}
             </span>
           )}
+          {gameTermination && (
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${gameTermination.badgeClass}`}
+              title={gameTermination.description}
+            >
+              <span>{gameTermination.icon}</span>
+              <span>{gameTermination.badge}</span>
+            </span>
+          )}
           {gameHeaders.ECO && (
             <span className="px-2 py-0.5 rounded text-xs font-mono bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
               {gameHeaders.ECO}
@@ -854,6 +1048,21 @@ export default function ChessAnalyzer({
               {currentCommentary.body}
             </p>
 
+            {/* If on final move, display explicit game conclusion outcome */}
+            {currentMoveIndex === moves.length && gameTermination && (
+              <div className={`mt-3 p-3 rounded-lg border flex items-start gap-2.5 text-xs ${gameTermination.badgeClass}`}>
+                <span className="text-xl shrink-0 leading-none">{gameTermination.icon}</span>
+                <div className="flex-1">
+                  <div className="font-bold text-xs uppercase tracking-wider mb-0.5">
+                    Game Outcome • {gameTermination.badge}
+                  </div>
+                  <div className="text-xs opacity-90 leading-relaxed">
+                    {gameTermination.description}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Quick Stat Bar for Current Move */}
             {currentMoveIndex > 0 && (
               <div className="mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
@@ -1002,47 +1211,69 @@ export default function ChessAnalyzer({
               {moves.length === 0 ? (
                 <div className="p-4 text-center text-zinc-400 dark:text-zinc-500">No moves loaded</div>
               ) : (
-                <div className="grid grid-cols-2 gap-1">
-                  {moves.map((move, idx) => {
-                    const isSelected = currentMoveIndex === idx + 1;
-                    const cachedScore = evalCache[idx + 1]?.scoreText;
-                    const classification = moveClassifications[idx + 1];
+                <div className="flex flex-col gap-1.5">
+                  <div className="grid grid-cols-2 gap-1">
+                    {moves.map((move, idx) => {
+                      const isSelected = currentMoveIndex === idx + 1;
+                      const cachedScore = evalCache[idx + 1]?.scoreText;
+                      const classification = moveClassifications[idx + 1];
 
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => setCurrentMoveIndex(idx + 1)}
-                        className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
-                          isSelected
-                            ? 'bg-blue-600 text-white font-bold'
-                            : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1">
-                          {move.isWhite && <span className="opacity-60">{move.moveNumber}.</span>}
-                          <span>{move.san}</span>
-                          {classification && classification.symbol && (
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => setCurrentMoveIndex(idx + 1)}
+                          className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
+                            isSelected
+                              ? 'bg-blue-600 text-white font-bold'
+                              : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1">
+                            {move.isWhite && <span className="opacity-60">{move.moveNumber}.</span>}
+                            <span>{move.san}</span>
+                            {classification && classification.symbol && (
+                              <span
+                                className={`text-[10px] font-bold ${
+                                  isSelected ? 'text-white' : classification.color
+                                }`}
+                              >
+                                {classification.symbol}
+                              </span>
+                            )}
+                          </span>
+                          {cachedScore && (
                             <span
-                              className={`text-[10px] font-bold ${
-                                isSelected ? 'text-white' : classification.color
+                              className={`text-[10px] ${
+                                isSelected ? 'text-blue-100' : 'text-zinc-400 dark:text-zinc-500'
                               }`}
                             >
-                              {classification.symbol}
+                              {cachedScore}
                             </span>
                           )}
-                        </span>
-                        {cachedScore && (
-                          <span
-                            className={`text-[10px] ${
-                              isSelected ? 'text-blue-100' : 'text-zinc-400 dark:text-zinc-500'
-                            }`}
-                          >
-                            {cachedScore}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Game Outcome Conclusion Pill at bottom of Move List */}
+                  {(gameTermination || gameHeaders.Result) && (
+                    <button
+                      onClick={() => setCurrentMoveIndex(moves.length)}
+                      className={`mt-1 w-full py-1.5 px-2.5 rounded-lg border text-xs font-semibold flex items-center justify-between transition-colors ${
+                        currentMoveIndex === moves.length
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300'
+                          : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-zinc-700 dark:text-zinc-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 truncate">
+                        <span>{gameTermination?.icon || '🏁'}</span>
+                        <span className="truncate">{gameTermination?.badge || `Result: ${gameHeaders.Result}`}</span>
+                      </span>
+                      <span className="font-mono text-[11px] opacity-75 shrink-0 ml-2">
+                        {gameHeaders.Result || ''}
+                      </span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
