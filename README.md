@@ -19,10 +19,17 @@
 * **Chess.com Profile Sync:**
   * Enter any username to fetch recent games, with ratings, game mode (bullet, blitz, rapid), date, and outcome.
   * Includes on-demand pagination (`⬇ Import 5 More Games`) without reloading.
-* **Raw PGN Upload / Paste:**
-  * Paste standard PGN text or choose any `.pgn` / `.txt` file from your device.
-* **1-Click Sample Games:**
-  * Instantly load famous historical matches (e.g. Morphy Opera Game, Kasparov vs Topalov) for quick testing.
+* **⚡ Trending Matches & Historic Masterpieces Showcase:**
+  * Curated showcase allowing users to load and analyze legendary modern clashes and historic games with 1 click:
+    * **🔥 Recent Trending Clashes:**
+      * **Gukesh D vs Ding Liren (2024 World Championship - Game 11):** Gukesh's historic `29. Qxc6!` queen sacrifice on his way to becoming the youngest World Champion in history at age 18.
+      * **Ding Liren vs Ian Nepomniachtchi (2023 World Championship - Tiebreak 4):** Ding's unforgettable `46... Rg6!!` self-pin refusal of a draw to capture the World Championship title.
+      * **R. Praggnanandhaa vs Magnus Carlsen (Norway Chess 2024):** 18-year-old Pragg's first classical victory against World #1 Magnus Carlsen.
+    * **🏛️ Historic Classics:**
+      * **Donald Byrne vs Bobby Fischer (1956 "Game of the Century"):** 13-year-old Fischer's immortal `17... Be6!!` queen sacrifice.
+      * **Paul Morphy vs Duke Karl (1858 Paris Opera House):** The quintessential classical attacking masterpiece ending in `17. Rd8#`.
+      * **Garry Kasparov vs Veselin Topalov (1999 "Kasparov's Immortal"):** Kasparov's double-rook sacrifice and 15-move king hunt.
+      * **Adolf Anderssen vs Lionel Kieseritzky (1851 "The Immortal Game"):** Sacrificing both rooks, a bishop, and a queen for a minor piece mate.
 
 ---
 
