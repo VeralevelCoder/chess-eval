@@ -6,21 +6,112 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat&logo=react)](https://react.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> A modern, zero-backend, client-side Chess PGN analyzer powered by **Stockfish WebAssembly** and **Next.js**. Import matches directly from **Chess.com**, upload or paste PGNs, and receive move-by-move engine commentary, accuracy grading, and instant blunder alerts.
+> A high-performance, zero-backend, client-side Chess PGN analyzer powered by **Stockfish WebAssembly**, **Next.js 16**, and **React 19**. Import games directly from **Chess.com**, paste shared links, upload PGNs, and receive move-by-move engine commentary, visual guide lines, blunder detection, and interactive best move suggestions.
 
 ---
 
-## ⚡ Highlights & Features
+## ⚡ Complete Feature Overview
 
-- **🚀 100% Client-Side Engine (Free Hosting):** Stockfish runs entirely inside the user's browser via Web Workers and WebAssembly. No expensive backend servers, timeout limits, or compute bills.
-- **♟️ Direct Chess.com Sync:** Enter any Chess.com username to instantly retrieve recent matches, preview player ratings, time controls, and outcomes, with on-demand pagination.
-- **🧠 Natural-Language Move Commentary:** Every move is evaluated and categorized (🌟 Best, ✨ Excellent, 👍 Good, ⚠️ Inaccuracy, ❌ Mistake, 🚨 Blunder, 👑 Checkmate) with contextual tactical explanations.
-- **🚨 Blunder Detection:** Replicates tournament engine logic to flag critical evaluation swings ($> 2.00$ pawns) and checkmate threats.
-- **⚡ Auto-Analyze Full Game:** One-click automated game review that evaluates all moves sequentially, produces an overall accuracy summary for White and Black, and annotates the full move list.
-- **📊 Real-time Dynamic Eval Bar:** Visual advantage gauge mirroring Chess.com / Lichess with centipawn and mate-distance readouts.
-- **🌙 Dark & Light Themes:** Toggleable theme with persistent storage in `localStorage` and system color scheme fallback.
-- **⌨️ Keyboard & Navigation Controls:** Navigate with `|◀`, `◀ Prev`, `Next ▶`, `▶|` or your keyboard's **Left/Right Arrow** keys.
-- **📱 Responsive Design:** Clean layout built with Tailwind CSS that works seamlessly across desktop and mobile screens.
+### 1. 🔗 Multiple Game Import Methods (`HomePage.js`)
+* **Direct Game Link / Share Text Import:**
+  * Paste any Chess.com URL (e.g. `https://www.chess.com/game/live/185520318828` or daily game links) or mobile share text (e.g. `Check out this #chess game: user1 vs user2 - https://www.chess.com/game/live/...`).
+  * Backend API route (`/api/chesscom/game`) queries Chess.com callback endpoints to resolve player details, moves, and official PGNs.
+* **Chess.com Profile Sync:**
+  * Enter any username to fetch recent games, with ratings, game mode (bullet, blitz, rapid), date, and outcome.
+  * Includes on-demand pagination (`⬇ Import 5 More Games`) without reloading.
+* **Raw PGN Upload / Paste:**
+  * Paste standard PGN text or choose any `.pgn` / `.txt` file from your device.
+* **1-Click Sample Games:**
+  * Instantly load famous historical matches (e.g. Morphy Opera Game, Kasparov vs Topalov) for quick testing.
+
+---
+
+### 2. 🎯 Visual Guide Lines & Interactive Board Arrows
+* **🟢 Best Move Arrow (Emerald Green):**
+  * Displays a guide arrow directly on the board pointing out Stockfish's top recommended move for the player to move.
+* **🔵/🚨 Color-Coded Played Move Arrow:**
+  * Displays the trajectory of the move just played, color-coded by quality:
+    * 🌟 **Best / Excellent:** Emerald green (`#10b981`)
+    * 👍 **Good:** Blue (`#3b82f6`)
+    * ⚠️ **Inaccuracy:** Amber (`#f59e0b`)
+    * ❌ **Mistake:** Orange (`#f97316`)
+    * 🚨 **Blunder:** Red (`#ef4444`)
+* **💡 Alternative Arrow for Mistakes (Cyan):**
+  * When reviewing an inaccuracy, mistake, or blunder, a cyan guide arrow appears indicating what move *should* have been played instead.
+* **Square Highlights (`squareStyles`):**
+  * Origin and destination squares of the played move are subtly tinted to match move quality.
+  * Recommended best move start and target squares glow with emerald target indicators.
+* **Custom User Drawing:**
+  * Right-click and drag on the board to draw custom tactical guide arrows anytime.
+* **Guide Lines Toolbar:**
+  * Quick toggles for:
+    * Master toggle (`Visible` / `Hidden`)
+    * `[🟢 Best Move]`
+    * `[🔵 Played]`
+    * `[💡 Alternative]`
+
+---
+
+### 3. 💡 Visual Best Move Suggestions & PV Continuation Card
+* **Engine Best Move Box:**
+  * Displays the player whose turn it is, the suggested move in Standard Algebraic Notation (SAN, e.g. `14... exd4` or `15. Rd8#`), and evaluation score.
+  * **`[👀 Preview Move]` Button:** Click to test and view the board position after playing the suggested move.
+* **Better Alternative Comparison (for Blunders & Mistakes):**
+  * Automatically highlights the error:
+    * 🚨 **Played:** `{san}` (*Mistake / Blunder*)
+    * 💡 **Engine Alternative:** `{recommended}`
+  * **`[👀 Preview Alternative on Board]` Button:** Test what the position would look like if the better move had been chosen.
+* **Guide Line Continuation Sequence (PV):**
+  * Converts the engine's Principal Variation into readable SAN move pills (e.g. `1. e4  e5  2. Nf3  Nc6  3. Bc4`).
+  * Clicking any move pill previews that continuation line directly on the board.
+* **Active Preview Banner:**
+  * While previewing an alternative or continuation, an alert bar indicates the previewed move with an **`[Exit Preview ✕]`** button to restore the live game position instantly.
+
+---
+
+### 4. 🧠 Natural-Language Move Commentary
+* Contextual grading for each move:
+  * 🌟 **Best Move** ($\le 15$ cp loss)
+  * ✨ **Excellent** ($\le 45$ cp loss)
+  * 👍 **Good Move** ($\le 90$ cp loss)
+  * ⚠️ **Inaccuracy** ($\le 180$ cp loss)
+  * ❌ **Mistake** ($\le 300$ cp loss)
+  * 🚨 **Critical Blunder** ($> 300$ cp loss or lost checkmate)
+  * 👑 **Checkmate**
+* Tactical annotations explaining captures, checks, castling, minor piece development, and evaluation swings.
+* Centipawn loss delta ($\Delta$) and depth readout for every position.
+
+---
+
+### 5. 🏁 Game Conclusion & Termination Detection
+* Detects and announces the exact conclusion of the match:
+  * 🏳️ **Win by Resignation** (extracted from PGN headers)
+  * 👑 **Win by Checkmate**
+  * 🤝 **Draw by Stalemate**
+  * ⏱️ **Win on Time**
+  * 🤝 **Draw by Repetition / Insufficient Material / Mutual Agreement**
+* **Multiple Outcome Indicators:**
+  * Displayed in the final move's commentary headline and body.
+  * Displayed in an explicit **Game Outcome** card in the Move Analysis panel.
+  * Displayed as a badge in the top header banner next to the result score (`1-0`, `0-1`, `1/2-1/2`).
+  * Rendered as a clickable conclusion button at the bottom of the Move History list.
+
+---
+
+### 6. ⚡ Full Game Auto-Analysis
+* **1-Click Review:** Evaluates all positions from start to finish in the background.
+* **Accuracy Breakdown:** Displays counts of Best, Good, Inaccuracies, Mistakes, and Blunders for both White and Black.
+* **Interactive Move List:** Moves are annotated with classification symbols (`★`, `!`, `✓`, `?!`, `?`, `??`, `#`) and cached evaluation scores.
+* **Quick Blunder Jumper:** `⏪ Prev Blunder` and `Next Blunder ⏩` buttons let you jump straight to pivotal mistakes.
+
+---
+
+### 7. 🎨 Theming & Navigation
+* **Dark & Light Modes:** Class-based dark theme (Tailwind CSS v4) with persistent `localStorage` saving and system preference fallback.
+* **Keyboard Navigation:**
+  * **Left / Right Arrow:** Previous / Next move.
+  * **Home / End:** First / Last move.
+* **Board Controls:** Flip board orientation (`White` / `Black`), engine depth adjustment (10, 12, 15, 18 ply).
 
 ---
 
@@ -28,139 +119,86 @@
 
 | Technology | Purpose |
 | :--- | :--- |
-| **Next.js 16 (App Router)** | Modern React framework with server-rendered routes and static prerendering |
-| **Stockfish.js / WASM** | UCI chess engine compiled to WebAssembly running in a background Web Worker |
-| **chess.js** | Chess rules, move validation, PGN parsing, and board state management |
-| **react-chessboard** | Interactive, animated SVG chessboard UI |
-| **Tailwind CSS v4** | Modern styling with dark mode support |
+| **Next.js 16 (App Router)** | Framework with Turbopack, static prerendering, and server routes |
+| **Stockfish.js / WASM** | Client-side UCI chess engine running in a dedicated Web Worker |
+| **chess.js (v1.4.0)** | Rule validation, FEN generation, SAN translation, and board state |
+| **react-chessboard (v5.12.1)** | Animated SVG chessboard with arrow overlays and square styles |
+| **chess-tcn** | Decoder for Chess.com compressed TCN move notations |
+| **Tailwind CSS v4** | Utility-first responsive styling and dark mode variant |
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) v18.0 or higher
-- `npm`, `pnpm`, or `yarn`
+* [Node.js](https://nodejs.org/) v18.0 or higher
+* `npm`, `pnpm`, or `yarn`
 
-### Installation
+### Running the App
 
-1. **Clone the repository:**
+```bash
+# Clone the repository
+git clone https://github.com/VeralevelCoder/chess-eval.git
+cd ChessEngine
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+> **Note on Project Directory Structure:**
+> Commands can be run either from the project root (`/`) or from `chess-eval/`. The root `package.json` proxies all scripts (`dev`, `build`, `start`, `lint`) directly to the `chess-eval` Next.js application.
+
+---
+
+## 📦 Project Structure
+
+```
+ChessEngine/
+├── package.json              # Root script proxy to chess-eval
+├── README.md                 # Project documentation
+└── chess-eval/
+    ├── public/
+    │   ├── stockfish.js      # Self-contained Stockfish JS worker
+    │   ├── stockfish.wasm.js # WebAssembly worker loader
+    │   └── stockfish.wasm    # Stockfish WASM binary
+    ├── src/
+    │   ├── app/
+    │   │   ├── api/
+    │   │   │   ├── chesscom/game/route.js # Direct URL & share text resolver
+    │   │   │   └── chesscom/route.js      # Profile games fetcher & paginator
+    │   │   ├── globals.css   # Tailwind v4 styles & dark mode variant
+    │   │   ├── layout.js     # Root HTML layout
+    │   │   └── page.js       # Router switching between HomePage and ChessAnalyzer
+    │   ├── components/
+    │   │   ├── ChessAnalyzer.js # Board, arrows, guide lines, eval bar, and commentary
+    │   │   └── HomePage.js      # Landing dashboard, link importer, profile sync, PGN upload
+    │   └── hooks/
+    │       └── useStockfish.js  # UCI Web Worker communication and async evaluation
+    ├── package.json
+    └── README.md
+```
+
+---
+
+## 🌐 Deployment (Vercel)
+
+Because engine computation runs client-side via WebAssembly in the user's browser, this application requires **zero server GPU/CPU compute** and is **100% free** to host on [Vercel](https://vercel.com/):
+
+1. **Deploy via Vercel CLI:**
    ```bash
-   git clone https://github.com/your-username/chess-eval.git
+   npm install -g vercel
    cd chess-eval
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Start the local development server:**
-   ```bash
-   npm run dev
-   ```
-
-4. Open **[http://localhost:3000](http://localhost:3000)** in your browser.
-
----
-
-## 📦 Project Structure
-
-```
-chess-eval/
-├── public/
-│   ├── stockfish.js          # Standalone JS Stockfish engine
-│   ├── stockfish.wasm.js     # WebAssembly worker loader
-│   └── stockfish.wasm        # Compiled Stockfish WASM binary
-├── src/
-│   ├── app/
-│   │   ├── api/chesscom/     # Server-side proxy for Chess.com public archives
-│   │   ├── globals.css       # Tailwind configuration and dark mode variant
-│   │   ├── layout.js         # Root layout with system font setup
-│   │   └── page.js           # Main view router (Home vs Analyzer)
-│   ├── components/
-│   │   ├── ChessAnalyzer.js  # Board, move list, eval bar, and commentary card
-│   │   └── HomePage.js       # Welcome hero, PGN uploader, and Chess.com importer
-│   └── hooks/
-│       └── useStockfish.js   # Custom hook managing the Stockfish Web Worker (UCI)
-└── package.json
-```
-
----
-
-## 🌐 Deploy to Vercel
-
-Because computation runs on the client device via WebAssembly, this project is **100% free** to host on Vercel:
-
-1. Install the Vercel CLI:
-   ```bash
-   npm install -g vercel
-   ```
-2. Deploy directly from the `chess-eval` folder:
-   ```bash
    vercel
    ```
-3. Or link your GitHub repository to [Vercel Dashboard](https://vercel.com/) for automatic deployments on every `git push`.
+2. **Deploy via GitHub Integration:**
+   Import your repository into the Vercel Dashboard with Root Directory set to `chess-eval`.
 
 ---
 
 ## 📄 License
 This project is licensed under the [MIT License](LICENSE). Stockfish is licensed under the [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0.html).
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Start the local development server:**
-   ```bash
-   npm run dev
-   ```
-
-4. Open **[http://localhost:3000](http://localhost:3000)** in your browser.
-
----
-
-## 📦 Project Structure
-
-```
-chess-eval/
-├── public/
-│   ├── stockfish.js          # Standalone JS Stockfish engine
-│   ├── stockfish.wasm.js     # WebAssembly worker loader
-│   └── stockfish.wasm        # Compiled Stockfish WASM binary
-├── src/
-│   ├── app/
-│   │   ├── api/chesscom/     # Server-side proxy for Chess.com public archives
-│   │   ├── globals.css       # Tailwind configuration and dark mode variant
-│   │   ├── layout.js         # Root layout with system font setup
-│   │   └── page.js           # Main view router (Home vs Analyzer)
-│   ├── components/
-│   │   ├── ChessAnalyzer.js  # Board, move list, eval bar, and commentary card
-│   │   └── HomePage.js       # Welcome hero, PGN uploader, and Chess.com importer
-│   └── hooks/
-│       └── useStockfish.js   # Custom hook managing the Stockfish Web Worker (UCI)
-└── package.json
-```
-
----
-
-## 🌐 Deploy to Vercel
-
-Because computation runs on the client device via WebAssembly, this project is **100% free** to host on Vercel:
-
-1. Install the Vercel CLI:
-   ```bash
-   npm install -g vercel
-   ```
-2. Deploy directly from the `chess-eval` folder:
-   ```bash
-   vercel
-   ```
-3. Or link your GitHub repository to [Vercel Dashboard](https://vercel.com/) for automatic deployments on every `git push`.
-
----
-
-## 📄 License
-This project is licensed under the [MIT License](LICENSE). Stockfish is licensed under the [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0.html).
-
