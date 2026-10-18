@@ -106,3 +106,61 @@ Because computation runs on the client device via WebAssembly, this project is *
 
 ## 📄 License
 This project is licensed under the [MIT License](LICENSE). Stockfish is licensed under the [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0.html).
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Start the local development server:**
+   ```bash
+   npm run dev
+   ```
+
+4. Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+
+---
+
+## 📦 Project Structure
+
+```
+chess-eval/
+├── public/
+│   ├── stockfish.js          # Standalone JS Stockfish engine
+│   ├── stockfish.wasm.js     # WebAssembly worker loader
+│   └── stockfish.wasm        # Compiled Stockfish WASM binary
+├── src/
+│   ├── app/
+│   │   ├── api/chesscom/     # Server-side proxy for Chess.com public archives
+│   │   ├── globals.css       # Tailwind configuration and dark mode variant
+│   │   ├── layout.js         # Root layout with system font setup
+│   │   └── page.js           # Main view router (Home vs Analyzer)
+│   ├── components/
+│   │   ├── ChessAnalyzer.js  # Board, move list, eval bar, and commentary card
+│   │   └── HomePage.js       # Welcome hero, PGN uploader, and Chess.com importer
+│   └── hooks/
+│       └── useStockfish.js   # Custom hook managing the Stockfish Web Worker (UCI)
+└── package.json
+```
+
+---
+
+## 🌐 Deploy to Vercel
+
+Because computation runs on the client device via WebAssembly, this project is **100% free** to host on Vercel:
+
+1. Install the Vercel CLI:
+   ```bash
+   npm install -g vercel
+   ```
+2. Deploy directly from the `chess-eval` folder:
+   ```bash
+   vercel
+   ```
+3. Or link your GitHub repository to [Vercel Dashboard](https://vercel.com/) for automatic deployments on every `git push`.
+
+---
+
+## 📄 License
+This project is licensed under the [MIT License](LICENSE). Stockfish is licensed under the [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0.html).
+
