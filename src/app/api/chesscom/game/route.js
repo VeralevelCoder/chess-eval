@@ -14,16 +14,11 @@ export async function POST(request) {
     }
 
     // Extract game ID and game type from URL or share text
-    // Handles formats like:
-    // https://www.chess.com/game/live/185520318828
-    // Check out this #chess game: userA vs userB - https://www.chess.com/game/live/185520318828
-    // https://www.chess.com/game/daily/185520318828
-    // https://www.chess.com/live/game/185520318828
-    // or plain numeric ID
+    // Requires exact chess.com domain (with dot escaped) or numeric ID
     const urlMatch =
-      input.match(/chess\.com\/(?:game\/)?(live|daily)\/(\d+)/i) ||
-      input.match(/chess\.com\/(\d+)/i) ||
-      input.match(/(\d{8,})/);
+      input.match(/(?:https?:\/\/)?(?:www\.)?chess\.com\/(?:game\/)?(live|daily)\/(\d+)/i) ||
+      input.match(/(?:https?:\/\/)?(?:www\.)?chess\.com\/(\d+)/i) ||
+      input.match(/\b(\d{8,16})\b/);
 
     if (!urlMatch) {
       return NextResponse.json(
@@ -32,8 +27,18 @@ export async function POST(request) {
       );
     }
 
-    const gameType = urlMatch[1]?.toLowerCase() === 'daily' ? 'daily' : 'live';
-    const gameId = urlMatch[2] || urlMatch[1];
+    const rawGameType = urlMatch[1]?.toLowerCase();
+    const gameType = (rawGameType === 'daily' || rawGameType === 'live') ? rawGameType : 'live';
+    const rawGameId = urlMatch[2] || urlMatch[1];
+
+    // Ensure gameId is strictly numeric (prevention of path traversal / parameter injection)
+    if (!rawGameId || !/^\d{5,16}$/.test(rawGameId)) {
+      return NextResponse.json(
+        { error: 'Invalid Chess.com Game ID format' },
+        { status: 400 }
+      );
+    }
+    const gameId = rawGameId;
 
     const headers = {
       'User-Agent': 'ChessEvalApp/1.0 (https://github.com/ChessEval; contact: user@example.com)',
@@ -72,13 +77,18 @@ export async function POST(request) {
     let finalPgn = '';
 
     // 2. Try fetching from monthly archive to get official PGN with clocks and ECO
-    const whiteUser = pgnHeaders.White;
+    const whiteUser = pgnHeaders.White?.trim();
     const dateStr = pgnHeaders.Date || '';
     const dateParts = dateStr.split('.');
     const year = dateParts[0];
     const month = dateParts[1]?.padStart(2, '0');
 
-    if (whiteUser && year && month) {
+    // Strict validation of user, year, and month to prevent path traversal in upstream API fetch
+    const isValidUser = whiteUser && /^[a-zA-Z0-9_\-]{3,30}$/.test(whiteUser);
+    const isValidYear = year && /^\d{4}$/.test(year) && parseInt(year, 10) >= 1990 && parseInt(year, 10) <= 2100;
+    const isValidMonth = month && /^(0[1-9]|1[0-2])$/.test(month);
+
+    if (isValidUser && isValidYear && isValidMonth) {
       try {
         const archUrl = `https://api.chess.com/pub/player/${encodeURIComponent(
           whiteUser.toLowerCase()

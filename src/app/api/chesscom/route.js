@@ -4,12 +4,17 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const username = searchParams.get('username')?.trim();
-    const limit = parseInt(searchParams.get('limit') || '5', 10);
-    const offset = parseInt(searchParams.get('offset') || '0', 10);
+    const rawLimit = parseInt(searchParams.get('limit') || '5', 10);
+    const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
 
-    if (!username) {
+    // Enforce safe bounds on pagination parameters (DoS prevention)
+    const limit = Math.max(1, Math.min(isNaN(rawLimit) ? 5 : rawLimit, 20));
+    const offset = Math.max(0, Math.min(isNaN(rawOffset) ? 0 : rawOffset, 200));
+
+    // Strict validation of Chess.com username format (3-30 chars, alphanumeric + hyphens/underscores)
+    if (!username || !/^[a-zA-Z0-9_\-]{3,30}$/.test(username)) {
       return NextResponse.json(
-        { error: 'Username query parameter is required' },
+        { error: 'Valid username (3-30 alphanumeric, hyphen, or underscore characters) is required' },
         { status: 400 }
       );
     }
@@ -40,7 +45,7 @@ export async function GET(request) {
     }
 
     const archivesData = await archivesRes.json();
-    const archives = archivesData.archives || [];
+    const archives = Array.isArray(archivesData.archives) ? archivesData.archives : [];
 
     if (archives.length === 0) {
       return NextResponse.json({
@@ -51,16 +56,23 @@ export async function GET(request) {
     }
 
     // Accumulate games starting from most recent archive month backwards
+    // Bound total upstream month fetches per request to prevent thread exhaustion DoS
+    const MAX_ARCHIVE_FETCHES = 3;
+    let archiveFetchCount = 0;
     const accumulatedGames = [];
     let archiveIdx = archives.length - 1;
 
-    while (archiveIdx >= 0 && accumulatedGames.length < offset + limit) {
+    while (archiveIdx >= 0 && accumulatedGames.length < offset + limit && archiveFetchCount < MAX_ARCHIVE_FETCHES) {
       const archiveUrl = archives[archiveIdx];
-      const monthRes = await fetch(archiveUrl, { headers, next: { revalidate: 60 } });
-      if (monthRes.ok) {
-        const monthData = await monthRes.json();
-        const monthGames = (monthData.games || []).reverse(); // newest first
-        accumulatedGames.push(...monthGames);
+      // SSRF guard: Ensure URL strictly targets the official Chess.com player API
+      if (typeof archiveUrl === 'string' && archiveUrl.startsWith('https://api.chess.com/pub/player/')) {
+        archiveFetchCount++;
+        const monthRes = await fetch(archiveUrl, { headers, next: { revalidate: 60 } });
+        if (monthRes.ok) {
+          const monthData = await monthRes.json();
+          const monthGames = (monthData.games || []).reverse(); // newest first
+          accumulatedGames.push(...monthGames);
+        }
       }
       archiveIdx--;
     }

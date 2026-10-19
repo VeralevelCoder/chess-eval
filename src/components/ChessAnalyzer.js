@@ -438,13 +438,19 @@ function generateCommentary(move, prevEval, currEval, classification, playerName
 // Called after full-game analysis completes, using a local cache snapshot.
 // ─────────────────────────────────────────────────────────────────────────────
 function generateGameSummary({ moves, evalCache, moveClassifications, gameHeaders, gameTermination }) {
-  const white = gameHeaders.White || 'White';
-  const black = gameHeaders.Black || 'Black';
-  const eco   = gameHeaders.ECO || '';
-  const opening = gameHeaders.Opening || eco || 'this opening';
-  const result  = gameHeaders.Result || '*';
-  const event   = (gameHeaders.Event || '').replace(/\?/g, '').trim();
-  const date    = (gameHeaders.Date  || '').replace(/\.\?\?/g, '').replace(/\?/g, '').trim();
+  // Defensive sanitization of untrusted PGN headers to prevent injection and markup issues
+  const sanitize = (val, maxLen = 60) =>
+    typeof val === 'string'
+      ? val.replace(/[<>{}\\\r\n\t]/g, '').slice(0, maxLen).trim()
+      : '';
+
+  const white = sanitize(gameHeaders.White) || 'White';
+  const black = sanitize(gameHeaders.Black) || 'Black';
+  const eco   = sanitize(gameHeaders.ECO, 10);
+  const opening = sanitize(gameHeaders.Opening) || eco || 'this opening';
+  const result  = sanitize(gameHeaders.Result, 10) || '*';
+  const event   = sanitize(gameHeaders.Event).replace(/\?/g, '').trim();
+  const date    = sanitize(gameHeaders.Date).replace(/\.\?\?/g, '').replace(/\?/g, '').trim();
 
   // ── Collect per-player stats & key moments ──────────────────────────────
   const whiteStats = { blunder: 0, mistake: 0, inaccuracy: 0, best: 0, excellent: 0, good: 0 };
@@ -743,6 +749,11 @@ export default function ChessAnalyzer({
   // Parse a PGN string into game headers and move list with FENs
   const loadPgnString = useCallback((pgn, gameId = '') => {
     const trimmed = (pgn || '').trim();
+    if (trimmed.length > 50000) {
+      setErrorMsg('PGN exceeds maximum allowable length of 50,000 characters.');
+      return;
+    }
+
     if (
       trimmed.includes('chess.com/game') ||
       trimmed.includes('chess.com/live') ||
@@ -763,6 +774,10 @@ export default function ChessAnalyzer({
       // Re-play moves step by step to capture FEN and SAN for each position
       const replay = new Chess();
       const history = chess.history({ verbose: true });
+      if (history.length > 500) {
+        setErrorMsg('Game notation exceeds maximum supported length (500 moves).');
+        return;
+      }
       const parsedMoves = [];
 
       for (let i = 0; i < history.length; i++) {
