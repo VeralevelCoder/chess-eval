@@ -4,6 +4,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Chess } from 'chess.js';
 import { Chessboard, defaultArrowOptions } from 'react-chessboard';
 import useStockfish from '../hooks/useStockfish';
+import { Analytics } from "@vercel/analytics/next";
+import { analyzeLast6Games } from '../utils/recentGamesAnalysis';
+import RecentGamesReviewModal from './RecentGamesReviewModal';
 
 const SAMPLE_PGN = `[Event "Paris Opera"]
 [Site "Paris FRA"]
@@ -869,6 +872,8 @@ export default function ChessAnalyzer({
   const [chesscomNextOffset, setChesscomNextOffset] = useState(0);
   const [chesscomError, setChesscomError] = useState('');
   const [activeGameId, setActiveGameId] = useState('');
+  const [showRecentSummaryModal, setShowRecentSummaryModal] = useState(false);
+  const [recentAnalysisSummary, setRecentAnalysisSummary] = useState(null);
 
   // Chess.com Direct Game Link States
   const [analyzerLinkInput, setAnalyzerLinkInput] = useState('');
@@ -1810,7 +1815,7 @@ export default function ChessAnalyzer({
 
     try {
       const offset = isLoadMore ? chesscomNextOffset : 0;
-      const res = await fetch(`/api/chesscom?username=${encodeURIComponent(user)}&limit=5&offset=${offset}`);
+      const res = await fetch(`/api/chesscom?username=${encodeURIComponent(user)}&limit=6&offset=${offset}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -1820,11 +1825,19 @@ export default function ChessAnalyzer({
       }
 
       if (isLoadMore) {
-        setChesscomGames((prev) => [...prev, ...data.games]);
+        const merged = [...chesscomGames, ...data.games];
+        setChesscomGames(merged);
+        const summary = analyzeLast6Games(merged, user);
+        setRecentAnalysisSummary(summary);
       } else {
-        setChesscomGames(data.games || []);
-        if (data.games && data.games.length === 0) {
+        const newGames = data.games || [];
+        setChesscomGames(newGames);
+        if (newGames.length === 0) {
           setChesscomError(`No recent games found for "${user}".`);
+          setRecentAnalysisSummary(null);
+        } else {
+          const summary = analyzeLast6Games(newGames, user);
+          setRecentAnalysisSummary(summary);
         }
       }
 
@@ -1857,31 +1870,32 @@ export default function ChessAnalyzer({
 
   return (
     <>
-    <div className="w-full max-w-6xl mx-auto px-4 py-6">
+    <Analytics />
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 overflow-x-hidden">
       {/* Top Banner / Status & Navigation Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-200 dark:border-zinc-800">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-4 sm:mb-6 pb-4 border-b border-zinc-200 dark:border-zinc-800 w-full">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap min-w-0">
           {onBackToHome && (
             <button
               onClick={onBackToHome}
-              className="px-3 py-1.5 text-xs font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-xs flex items-center gap-1.5"
+              className="px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-xs flex items-center gap-1.5 shrink-0"
               title="Return to Home to select a different game"
             >
               <span>←</span>
               <span>Home</span>
             </button>
           )}
-          <span className="font-extrabold text-lg text-zinc-900 dark:text-zinc-50 tracking-tight">
+          <span className="font-extrabold text-base sm:text-lg text-zinc-900 dark:text-zinc-50 tracking-tight truncate max-w-[200px] sm:max-w-none">
             {gameHeaders.White || 'White'} vs {gameHeaders.Black || 'Black'}
           </span>
           {gameHeaders.Result && (
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
+            <span className="px-2 sm:px-2.5 py-0.5 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700 shrink-0">
               {gameHeaders.Result}
             </span>
           )}
           {gameTermination && (
             <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${gameTermination.badgeClass}`}
+              className={`inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-full text-xs font-semibold border shrink-0 ${gameTermination.badgeClass}`}
               title={gameTermination.description}
             >
               <span>{gameTermination.icon}</span>
@@ -1889,16 +1903,16 @@ export default function ChessAnalyzer({
             </span>
           )}
           {gameHeaders.ECO && (
-            <span className="px-2 py-0.5 rounded text-xs font-mono bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+            <span className="px-2 py-0.5 rounded text-xs font-mono bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
               {gameHeaders.ECO}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {/* Engine Status Badge */}
           <span
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
+            className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium shrink-0 ${
               isReady
                 ? evaluating || isAnalyzingAll
                   ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
@@ -1907,7 +1921,7 @@ export default function ChessAnalyzer({
             }`}
           >
             <span
-              className={`w-2 h-2 rounded-full ${
+              className={`w-2 h-2 rounded-full shrink-0 ${
                 isReady
                   ? evaluating || isAnalyzingAll
                     ? 'bg-amber-500 animate-pulse'
@@ -1915,19 +1929,21 @@ export default function ChessAnalyzer({
                   : 'bg-zinc-400'
               }`}
             />
-            {isReady
-              ? isAnalyzingAll
-                ? `Auto-analyzing (${analysisProgress.current}/${analysisProgress.total})...`
-                : evaluating
-                ? 'Stockfish Thinking...'
-                : 'Stockfish Ready'
-              : 'Initializing Stockfish...'}
+            <span className="truncate">
+              {isReady
+                ? isAnalyzingAll
+                  ? `Analyzing (${analysisProgress.current}/${analysisProgress.total})`
+                  : evaluating
+                  ? 'Thinking...'
+                  : 'Stockfish Ready'
+                : 'Initializing...'}
+            </span>
           </span>
 
           {/* Flip Board Button */}
           <button
             onClick={() => setBoardOrientation((prev) => (prev === 'white' ? 'black' : 'white'))}
-            className="px-3 py-1 text-xs font-medium rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-sm"
+            className="px-2.5 sm:px-3 py-1 text-xs font-medium rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-sm shrink-0"
           >
             Flip ({boardOrientation === 'white' ? 'White' : 'Black'})
           </button>
@@ -1935,7 +1951,7 @@ export default function ChessAnalyzer({
           {/* Dark / Light Mode Switcher */}
           <button
             onClick={toggleDarkMode}
-            className="p-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-sm flex items-center justify-center"
+            className="p-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-sm flex items-center justify-center shrink-0"
             title={isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
           >
             {isDark ? (
@@ -1952,9 +1968,76 @@ export default function ChessAnalyzer({
       </div>
 
       {/* Main Grid: Board & Navigation vs Analysis, Move List & Imports */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Board + Eval Bar + Navigation + Move Commentary + Visual Suggestions (7 cols) */}
-        <div className="lg:col-span-7 flex flex-col items-center">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start w-full min-w-0">
+        {/* Left Column: Guide Lines + Board + Navigation + Advantage Narrative (7 cols) */}
+        <div className="lg:col-span-7 flex flex-col items-center w-full min-w-0">
+          {/* Guide Lines & Visual Suggestions Toolbar (On Top) */}
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3 w-full max-w-[500px] p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-xs transition-colors">
+            <div className="flex items-center gap-1.5 font-bold text-zinc-700 dark:text-zinc-300">
+              <span>🎯</span>
+              <span className="text-[11px] uppercase tracking-wider">Guide Lines:</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={() => setShowGuideLines((prev) => !prev)}
+                className={`px-2 py-0.5 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${
+                  showGuideLines
+                    ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                    : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500'
+                }`}
+                title="Toggle all board guide lines and arrows"
+              >
+                {showGuideLines ? 'Visible' : 'Hidden'}
+              </button>
+
+              {showGuideLines && (
+                <>
+                  <button
+                    onClick={() => setShowBestMoveArrow((prev) => !prev)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors cursor-pointer ${
+                      showBestMoveArrow
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
+                    }`}
+                    title="Toggle green best move recommendation arrow"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span>Best Move</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowPlayedMoveArrow((prev) => !prev)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors cursor-pointer ${
+                      showPlayedMoveArrow
+                        ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                        : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
+                    }`}
+                    title="Toggle played move trail arrow"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                    <span>Played</span>
+                  </button>
+
+                  {previousAlternative && (
+                    <button
+                      onClick={() => setShowAlternativeArrow((prev) => !prev)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors cursor-pointer ${
+                        showAlternativeArrow
+                          ? 'bg-cyan-50 dark:bg-cyan-950/50 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300'
+                          : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
+                      }`}
+                      title="Toggle cyan alternative arrow for what should have been played"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-cyan-500" />
+                      <span>Alternative</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
           {/* Active Move Preview Banner */}
           {previewState && (
             <div
@@ -1993,20 +2076,20 @@ export default function ChessAnalyzer({
           )}
 
           {/* Board + Eval Bar container */}
-          <div className="flex items-stretch gap-3 w-full max-w-[500px]">
+          <div className="flex items-stretch gap-2.5 sm:gap-3 w-full max-w-[500px] justify-center">
             {/* Vertical Eval Bar */}
-            <div className="w-6 bg-zinc-900 rounded-md overflow-hidden flex flex-col justify-end border border-zinc-300 dark:border-zinc-700 shadow-inner relative select-none">
+            <div className="w-5 sm:w-6 bg-zinc-900 rounded-md overflow-hidden flex flex-col justify-end border border-zinc-300 dark:border-zinc-700 shadow-inner relative select-none shrink-0 self-stretch">
               <div
                 className="w-full bg-zinc-100 transition-all duration-300 ease-out"
                 style={{ height: `${evalPercentage}%` }}
               />
-              <div className="absolute inset-x-0 bottom-1 text-[9px] font-mono font-bold text-center text-zinc-900 bg-white/70 backdrop-blur-xs py-0.5">
+              <div className="absolute inset-x-0 bottom-1 text-[8px] sm:text-[9px] font-mono font-bold text-center text-zinc-900 bg-white/70 backdrop-blur-xs py-0.5">
                 {activeEval?.scoreText || '0.00'}
               </div>
             </div>
 
             {/* React Chessboard with Options */}
-            <div className="flex-1 aspect-square rounded-lg overflow-hidden shadow-md border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900">
+            <div className="flex-1 min-w-0 aspect-square rounded-lg overflow-hidden shadow-md border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900">
               <Chessboard
                 options={{
                   position: retryState
@@ -2034,11 +2117,11 @@ export default function ChessAnalyzer({
           </div>
 
           {/* Move Navigation Controls */}
-          <div className="flex items-center justify-center gap-2 mt-4 w-full max-w-[500px] select-none" style={{ touchAction: 'manipulation' }}>
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 mt-3 sm:mt-4 w-full max-w-[500px] select-none" style={{ touchAction: 'manipulation' }}>
             <button
               onClick={goToStart}
               disabled={currentMoveIndex === 0}
-              className="px-3 py-2 text-sm font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 shadow-sm transition-colors"
+              className="px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 shadow-sm transition-colors"
               title="First move (Home)"
             >
               |◀
@@ -2046,7 +2129,7 @@ export default function ChessAnalyzer({
             <button
               onClick={goToPrev}
               disabled={currentMoveIndex === 0}
-              className="px-4 py-2 text-sm font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 shadow-sm transition-colors flex-1"
+              className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 shadow-sm transition-colors flex-1"
               title="Previous move (Left arrow)"
             >
               ◀ Prev
@@ -2054,7 +2137,7 @@ export default function ChessAnalyzer({
             <button
               onClick={goToNext}
               disabled={currentMoveIndex >= moves.length}
-              className="px-4 py-2 text-sm font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 shadow-sm transition-colors flex-1"
+              className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 shadow-sm transition-colors flex-1"
               title="Next move (Right arrow)"
             >
               Next ▶
@@ -2062,26 +2145,26 @@ export default function ChessAnalyzer({
             <button
               onClick={goToEnd}
               disabled={currentMoveIndex >= moves.length}
-              className="px-3 py-2 text-sm font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 shadow-sm transition-colors"
+              className="px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 shadow-sm transition-colors"
               title="Last move (End)"
             >
               ▶|
             </button>
           </div>
           {/* Quick Blunder Jumper & Progress */}
-          <div className="flex items-center justify-between gap-2 mt-2 w-full max-w-[500px] text-xs">
+          <div className="flex items-center justify-between gap-1.5 sm:gap-2 mt-2 w-full max-w-[500px] text-xs">
             <button
               onClick={goToPrevBlunder}
-              className="text-zinc-600 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 font-medium transition-colors"
+              className="text-zinc-600 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 font-medium transition-colors text-[11px] sm:text-xs shrink-0"
             >
               ⏪ Prev Blunder
             </button>
-            <span className="text-zinc-400 dark:text-zinc-500 font-medium">
+            <span className="text-zinc-400 dark:text-zinc-500 font-medium text-[11px] sm:text-xs truncate text-center px-1">
               {currentMoveIndex === 0 ? 'Start' : `Move ${currentMoveIndex} of ${moves.length}`}
             </span>
             <button
               onClick={goToNextBlunder}
-              className="text-zinc-600 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 font-medium transition-colors"
+              className="text-zinc-600 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 font-medium transition-colors text-[11px] sm:text-xs shrink-0"
             >
               Next Blunder ⏩
             </button>
@@ -2095,14 +2178,15 @@ export default function ChessAnalyzer({
                 <span className="text-[11px] uppercase tracking-wider">Advantage Narrative</span>
               </div>
               <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                Click graph to jump to move
+                Click or tap to jump
               </span>
             </div>
 
             <div
-              className="relative w-full h-[76px] bg-zinc-50 dark:bg-zinc-950/70 rounded-lg overflow-hidden border border-zinc-200/80 dark:border-zinc-800 cursor-pointer"
+              className="relative w-full h-[68px] sm:h-[76px] bg-zinc-50 dark:bg-zinc-950/70 rounded-lg overflow-hidden border border-zinc-200/80 dark:border-zinc-800 cursor-pointer"
               onClick={handleGraphClick}
-              title="Click on the advantage graph to jump to that move"
+              onTouchStart={handleGraphClick}
+              title="Click or tap on the advantage graph to jump to that move"
             >
               {moves.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-xs text-zinc-400">
@@ -2191,275 +2275,39 @@ export default function ChessAnalyzer({
               )}
             </div>
           </div>
-          {/* Guide Lines & Visual Suggestions Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-3 w-full max-w-[500px] p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-xs transition-colors">
-            <div className="flex items-center gap-1.5 font-bold text-zinc-700 dark:text-zinc-300">
-              <span>🎯</span>
-              <span className="text-[11px] uppercase tracking-wider">Guide Lines:</span>
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={() => setShowGuideLines((prev) => !prev)}
-                className={`px-2 py-0.5 rounded text-[11px] font-semibold border transition-colors ${
-                  showGuideLines
-                    ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
-                    : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500'
-                }`}
-                title="Toggle all board guide lines and arrows"
-              >
-                {showGuideLines ? 'Visible' : 'Hidden'}
-              </button>
-
-              {showGuideLines && (
-                <>
-                  <button
-                    onClick={() => setShowBestMoveArrow((prev) => !prev)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors ${
-                      showBestMoveArrow
-                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
-                        : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
-                    }`}
-                    title="Toggle green best move recommendation arrow"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                    <span>Best Move</span>
-                  </button>
-
-                  <button
-                    onClick={() => setShowPlayedMoveArrow((prev) => !prev)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors ${
-                      showPlayedMoveArrow
-                        ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
-                        : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
-                    }`}
-                    title="Toggle played move trail arrow"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-blue-500" />
-                    <span>Played</span>
-                  </button>
-
-                  {previousAlternative && (
-                    <button
-                      onClick={() => setShowAlternativeArrow((prev) => !prev)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-1 transition-colors ${
-                        showAlternativeArrow
-                          ? 'bg-cyan-50 dark:bg-cyan-950/50 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300'
-                          : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400'
-                      }`}
-                      title="Toggle cyan alternative arrow for what should have been played"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-cyan-500" />
-                      <span>Alternative</span>
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="w-full max-w-[500px] text-[10px] text-zinc-400 dark:text-zinc-500 text-center mt-1">
-            Tip: Right-click and drag on the board to draw your own custom guide arrows.
-          </div>
-
-          {/* Move Evaluation & Commentary Card */}
-          <div className="mt-4 w-full max-w-[500px] p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm transition-colors">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                Move Analysis
-              </span>
-              {currentMoveIndex > 0 && (
-                <span
-                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${currentClassification.badgeClass}`}
-                >
-                  <span>{currentClassification.icon}</span>
-                  <span>{currentClassification.label}</span>
-                </span>
-              )}
-            </div>
-
-            <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-100 mb-1">
-              {currentCommentary.headline}
-            </h3>
-            <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
-              {currentCommentary.body}
-            </p>
-
-            {/* If on final move, display explicit game conclusion outcome */}
-            {currentMoveIndex === moves.length && gameTermination && (
-              <div className={`mt-3 p-3 rounded-lg border flex items-start gap-2.5 text-xs ${gameTermination.badgeClass}`}>
-                <span className="text-xl shrink-0 leading-none">{gameTermination.icon}</span>
-                <div className="flex-1">
-                  <div className="font-bold text-xs uppercase tracking-wider mb-0.5">
-                    Game Outcome • {gameTermination.badge}
-                  </div>
-                  <div className="text-xs opacity-90 leading-relaxed">
-                    {gameTermination.description}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Quick Stat Bar for Current Move */}
-            {currentMoveIndex > 0 && (
-              <div className="mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
-                <span>
-                  Position Eval:{' '}
-                  <strong className="text-zinc-900 dark:text-zinc-100">
-                    {activeEval?.scoreText || '0.00'}
-                  </strong>
-                </span>
-                {evalCache[currentMoveIndex - 1] && evalCache[currentMoveIndex] && (
-                  <span>
-                    Delta:{' '}
-                    <strong
-                      className={
-                        (evalCache[currentMoveIndex].value - evalCache[currentMoveIndex - 1].value) *
-                          (moves[currentMoveIndex - 1]?.isWhite ? 1 : -1) >= 0
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-red-600 dark:text-red-400'
-                      }
-                    >
-                      {((evalCache[currentMoveIndex].value - evalCache[currentMoveIndex - 1].value) / 100).toFixed(2)}
-                    </strong>
-                  </span>
-                )}
-                <span>Depth {activeEval?.depth || 0}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Visual Best Move Suggestion & Guide Lines Card */}
-          <div className="mt-4 w-full max-w-[500px] p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm transition-colors flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
-                <span>💡</span>
-                <span>Best Move & Guide Line</span>
-              </span>
-              {activeEval?.bestMove && activeEval.bestMove !== '(none)' && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                  Stockfish Suggestion
-                </span>
-              )}
-            </div>
-
-            {/* Error Alternative (if current move was a blunder/mistake/inaccuracy) */}
-            {previousAlternative && (
-              <div className="p-3 rounded-lg border border-cyan-200 dark:border-cyan-900/60 bg-cyan-50/70 dark:bg-cyan-950/30 flex flex-col gap-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-cyan-900 dark:text-cyan-200 flex items-center gap-1.5">
-                    <span>💡</span> Better Alternative for Move {moves[currentMoveIndex - 1]?.moveNumber}:
-                  </span>
-                  <span className="font-mono font-extrabold text-sm text-cyan-700 dark:text-cyan-300">
-                    {previousAlternative.san}
-                  </span>
-                </div>
-                <div className="text-xs text-cyan-800/90 dark:text-cyan-300/90 leading-relaxed">
-                  Instead of {moves[currentMoveIndex - 1]?.san} ({currentClassification.label}), playing <strong>{previousAlternative.san}</strong> was recommended by Stockfish.
-                </div>
-                <button
-                  onClick={handlePreviewAlternative}
-                  disabled={previewState?.moveSan === previousAlternative.san}
-                  style={{ touchAction: 'manipulation' }}
-                  className="self-start px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5"
-                >
-                  <span>👀</span>
-                  <span>{previewState?.moveSan === previousAlternative.san ? 'Previewing Alternative' : `Preview ${previousAlternative.san} on Board`}</span>
-                </button>
-              </div>
-            )}
-
-            {/* Next Recommended Best Move */}
-            {currentBestMove ? (
-              <div className="p-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/50 flex flex-col gap-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      Best Move for {currentFen.split(' ')[1] === 'w' ? 'White' : 'Black'}:
-                    </span>
-                    <strong className="font-mono text-base font-extrabold text-emerald-600 dark:text-emerald-400">
-                      {currentBestMove.san}
-                    </strong>
-                  </div>
-                  <button
-                    onClick={handlePreviewBestMove}
-                    disabled={previewState?.moveSan === currentBestMove.san}
-                    style={{ touchAction: 'manipulation' }}
-                    className="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5"
-                  >
-                    <span>👀</span>
-                    <span>{previewState?.moveSan === currentBestMove.san ? 'Previewing' : 'Preview Move'}</span>
-                  </button>
-                </div>
-
-                {/* Continuation / PV Sequence */}
-                {currentContinuation.length > 0 && (
-                  <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800/80 flex flex-col gap-1.5">
-                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                      Guide Line Continuation:
-                    </span>
-                    <div className="flex items-center gap-1 flex-wrap font-mono text-xs">
-                      {currentContinuation.map((step, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => handlePreviewContinuation(step)}
-                          className={`px-2 py-0.5 rounded border transition-colors ${
-                            previewState?.moveSan === step.san
-                              ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
-                              : 'bg-white dark:bg-zinc-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200'
-                          }`}
-                          title={`Click to preview position after ${step.san}`}
-                        >
-                          {step.turn === 'w' && <span className="opacity-60 mr-0.5">{step.moveNum}.</span>}
-                          <span>{step.san}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="p-3 text-xs text-zinc-500 dark:text-zinc-400 text-center italic">
-                {currentMoveIndex === moves.length && gameTermination
-                  ? 'Game concluded — no further legal moves.'
-                  : 'Evaluating best move suggestions...'}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Right Column: Game Review vs Deep Analysis Dual Experience (5 cols) */}
-        <div className="lg:col-span-5 flex flex-col gap-4">
+        <div className="lg:col-span-5 flex flex-col gap-4 w-full max-w-[500px] lg:max-w-none mx-auto lg:mx-0 min-w-0">
           {/* Rule 5: Dual Mode Switcher */}
-          <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800/90 rounded-xl border border-zinc-200 dark:border-zinc-700/80 shadow-xs">
+          <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800/90 rounded-xl border border-zinc-200 dark:border-zinc-700/80 shadow-xs w-full">
             <button
               onClick={() => { setAnalysisTab('review'); setRetryState(null); }}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 select-none cursor-pointer ${
+              className={`flex-1 py-2 px-2 sm:px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 sm:gap-2 select-none cursor-pointer min-w-0 ${
                 analysisTab === 'review'
                   ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50 shadow-xs ring-1 ring-zinc-200 dark:ring-zinc-700'
                   : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
               }`}
             >
-              <span className="text-sm">⭐</span>
-              <span>Game Review</span>
+              <span className="text-sm shrink-0">⭐</span>
+              <span className="truncate">Game Review</span>
               {accuracyScores.hasData && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-mono font-bold">
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-mono font-bold shrink-0 hidden sm:inline">
                   {accuracyScores.white}% / {accuracyScores.black}%
                 </span>
               )}
             </button>
             <button
               onClick={() => { setAnalysisTab('deep'); setRetryState(null); }}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 select-none cursor-pointer ${
+              className={`flex-1 py-2 px-2 sm:px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 sm:gap-2 select-none cursor-pointer min-w-0 ${
                 analysisTab === 'deep'
                   ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50 shadow-xs ring-1 ring-zinc-200 dark:ring-zinc-700'
                   : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
               }`}
             >
-              <span className="text-sm">🔬</span>
-              <span>Deep Analysis</span>
-              <span className="text-[10px] text-zinc-400 font-mono">Depth {evalDepth}</span>
+              <span className="text-sm shrink-0">🔬</span>
+              <span className="truncate">Deep Analysis</span>
+              <span className="text-[10px] text-zinc-400 font-mono shrink-0 hidden sm:inline">Depth {evalDepth}</span>
             </button>
           </div>
 
@@ -2562,24 +2410,24 @@ export default function ChessAnalyzer({
               )}
 
               {/* Rule 3: The Virtual Coach Speech Bubble Card */}
-              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-xs transition-colors flex flex-col gap-3">
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-xs transition-colors flex flex-col gap-3 w-full min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-lg shadow-2xs select-none">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-lg shadow-2xs select-none shrink-0">
                       {currentVirtualCoach.avatar}
                     </div>
-                    <div>
-                      <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                    <div className="min-w-0">
+                      <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 truncate">
                         <span>Virtual Coach</span>
-                        <span className="text-[10px] font-normal text-zinc-400">• {currentVirtualCoach.mood}</span>
+                        <span className="text-[10px] font-normal text-zinc-400 truncate">• {currentVirtualCoach.mood}</span>
                       </h3>
-                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 truncate block">
                         {currentVirtualCoach.title}
                       </span>
                     </div>
                   </div>
                   {currentMoveIndex > 0 && (
-                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${currentClassification.badgeClass}`}>
+                    <span className={`inline-flex items-center gap-1 px-2 sm:px-2.5 py-0.5 rounded-full text-xs font-bold border shrink-0 ${currentClassification.badgeClass}`}>
                       <span>{currentClassification.icon}</span>
                       <span>{currentClassification.label}</span>
                     </span>
@@ -2594,11 +2442,76 @@ export default function ChessAnalyzer({
                 {/* Game outcome conclusion in review */}
                 {currentMoveIndex === moves.length && gameTermination && (
                   <div className={`p-2.5 rounded-lg border flex items-center gap-2 text-xs ${gameTermination.badgeClass}`}>
-                    <span className="text-lg">{gameTermination.icon}</span>
-                    <span className="font-semibold">{gameTermination.description}</span>
+                    <span className="text-lg shrink-0">{gameTermination.icon}</span>
+                    <span className="font-semibold text-xs leading-snug">{gameTermination.description}</span>
                   </div>
                 )}
               </div>
+
+              {/* Best Move Guidance (Paired with Virtual Coach) */}
+              {currentBestMove && (
+                <div className="p-3 sm:p-3.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xs flex flex-col gap-2.5 transition-colors w-full min-w-0">
+                  <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                    <div className="flex items-center gap-1.5 sm:gap-2 truncate min-w-0">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 shrink-0">
+                        Best Move ({currentFen.split(' ')[1] === 'w' ? 'White' : 'Black'}):
+                      </span>
+                      <strong className="font-mono text-sm sm:text-base font-extrabold text-emerald-600 dark:text-emerald-400 truncate">
+                        {currentBestMove.san}
+                      </strong>
+                    </div>
+                    <button
+                      onClick={handlePreviewBestMove}
+                      disabled={previewState?.moveSan === currentBestMove.san}
+                      className="px-2.5 sm:px-3 py-1 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0 cursor-pointer flex items-center gap-1"
+                    >
+                      <span>👀</span>
+                      <span>{previewState?.moveSan === currentBestMove.san ? 'Previewing' : 'Preview'}</span>
+                    </button>
+                  </div>
+
+                  {/* Alternative Move for Blunder/Mistake if available */}
+                  {previousAlternative && (
+                    <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                      <span className="text-xs text-zinc-600 dark:text-zinc-400 truncate min-w-0">
+                        Better for move {moves[currentMoveIndex - 1]?.moveNumber}: <strong className="font-mono text-cyan-600 dark:text-cyan-400">{previousAlternative.san}</strong>
+                      </span>
+                      <button
+                        onClick={handlePreviewAlternative}
+                        disabled={previewState?.moveSan === previousAlternative.san}
+                        className="px-2 py-0.5 bg-cyan-50 dark:bg-cyan-950/60 hover:bg-cyan-100 dark:hover:bg-cyan-900/80 text-cyan-700 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-700 text-[11px] font-bold rounded transition-colors shrink-0 cursor-pointer"
+                      >
+                        {previewState?.moveSan === previousAlternative.san ? 'Previewing' : 'Alternative'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Continuation / PV Sequence */}
+                  {currentContinuation.length > 0 && (
+                    <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center gap-1.5 flex-wrap font-mono text-xs">
+                      <span className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mr-1">
+                        Continuation:
+                      </span>
+                      {currentContinuation.slice(0, 5).map((step, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handlePreviewContinuation(step)}
+                          className={`px-1.5 py-0.5 rounded text-[11px] border transition-colors cursor-pointer ${
+                            previewState?.moveSan === step.san
+                              ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                              : 'bg-zinc-50 dark:bg-zinc-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300'
+                          }`}
+                          title={`Click to preview position after ${step.san}`}
+                        >
+                          {step.turn === 'w' && <span className="opacity-60 mr-0.5">{step.moveNum}.</span>}
+                          <span>{step.san}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Rule 4: Active Remediation ("Retry Mistakes") Card */}
               {previousAlternative && ['blunder', 'mistake', 'inaccuracy', 'missedWin'].includes(currentClassification?.type) && (
@@ -2712,25 +2625,6 @@ export default function ChessAnalyzer({
                 </div>
               )}
 
-              {/* Simplified Best Move Preview Card (Rule 5: Progressive Disclosure) */}
-              {currentBestMove && (
-                <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xs flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                    <span className="text-xs text-zinc-600 dark:text-zinc-400">Best Move:</span>
-                    <strong className="font-mono font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
-                      {currentBestMove.san}
-                    </strong>
-                  </div>
-                  <button
-                    onClick={handlePreviewBestMove}
-                    disabled={previewState?.moveSan === currentBestMove.san}
-                    className="px-3 py-1 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0 cursor-pointer"
-                  >
-                    {previewState?.moveSan === currentBestMove.san ? 'Previewing' : '👀 Preview'}
-                  </button>
-                </div>
-              )}
 
               {/* Friendly Move List with Emotion Icons (Rule 2) */}
               <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden shadow-xs flex flex-col transition-colors">
@@ -3076,9 +2970,44 @@ export default function ChessAnalyzer({
                     {/* List of Retrieved Games */}
                     {chesscomGames.length > 0 && (
                       <div className="flex flex-col gap-2 mt-1">
-                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">
-                          Recent games for <strong>{chesscomUsername}</strong>:
-                        </span>
+                        {/* 6-Games Summary Banner */}
+                        {recentAnalysisSummary && (
+                          <div className="p-3 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-gradient-to-r from-blue-50/90 to-indigo-50/50 dark:from-blue-950/40 dark:to-indigo-950/30 flex flex-col gap-2 shadow-2xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-base select-none">{recentAnalysisSummary.trend.icon}</span>
+                                <span className="font-bold text-xs text-zinc-900 dark:text-zinc-100 truncate">
+                                  {recentAnalysisSummary.trend.title}
+                                </span>
+                              </div>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full border shrink-0 ${recentAnalysisSummary.trend.badgeClass}`}>
+                                {recentAnalysisSummary.winRate}% Win
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => setShowRecentSummaryModal(true)}
+                              className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              <span>📊</span>
+                              <span>Review Last 6 Games</span>
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium truncate">
+                            Recent games for <strong>{chesscomUsername}</strong>:
+                          </span>
+                          {recentAnalysisSummary && (
+                            <button
+                              onClick={() => setShowRecentSummaryModal(true)}
+                              className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-semibold shrink-0 cursor-pointer"
+                            >
+                              Report →
+                            </button>
+                          )}
+                        </div>
+
                         <div className="max-h-[240px] overflow-y-auto flex flex-col gap-2 pr-1">
                           {chesscomGames.map((game) => {
                             const isCurrentActive = activeGameId === game.id;
@@ -3127,7 +3056,7 @@ export default function ChessAnalyzer({
                             disabled={chesscomLoading}
                             className="w-full py-1.5 mt-1 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
                           >
-                            {chesscomLoading ? 'Importing more...' : '⬇ Import 5 More Games'}
+                            {chesscomLoading ? 'Importing more...' : '⬇ Import 6 More Games'}
                           </button>
                         )}
                       </div>
@@ -3148,25 +3077,25 @@ export default function ChessAnalyzer({
           ═══════════════════════════════════════════════════════════════════ */}
       {showGameSummary && gameSummaryData && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
           style={{ backdropFilter: 'blur(4px)', backgroundColor: 'rgba(0,0,0,0.55)' }}
           onClick={() => setShowGameSummary(false)}
         >
           {/* Card — stop click propagation so backdrop click doesn't close when clicking inside */}
           <div
-            className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+            className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
 
             {/* ── Header ──────────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/30 rounded-t-2xl flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl select-none">🏆</span>
-                <div>
-                  <h2 className="text-base font-extrabold text-zinc-900 dark:text-zinc-50 tracking-tight leading-tight">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-zinc-200 dark:border-zinc-800 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/30 rounded-t-2xl flex-shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <span className="text-xl sm:text-2xl select-none shrink-0">🏆</span>
+                <div className="min-w-0">
+                  <h2 className="text-sm sm:text-base font-extrabold text-zinc-900 dark:text-zinc-50 tracking-tight leading-tight truncate">
                     Game Analysis Summary
                   </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">
                     {gameSummaryData.players.white} vs {gameSummaryData.players.black}
                     <span className="mx-1 opacity-40">•</span>
                     {gameSummaryData.result}
@@ -3184,19 +3113,19 @@ export default function ChessAnalyzer({
             </div>
 
             {/* ── Scrollable Body ──────────────────────────────────────────── */}
-            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+            <div className="overflow-y-auto flex-1 px-4 sm:px-6 py-4 sm:py-5 space-y-4 sm:space-y-5">
 
               {/* Narrative paragraphs */}
               <div className="space-y-2.5">
                 {gameSummaryData.paragraphs.map((para, idx) => (
-                  <p key={idx} className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                  <p key={idx} className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
                     {para}
                   </p>
                 ))}
               </div>
 
               {/* Per-player stat cards */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                 {[
                   { label: gameSummaryData.players.white, icon: '⚪', stats: gameSummaryData.stats.white },
                   { label: gameSummaryData.players.black, icon: '⚫', stats: gameSummaryData.stats.black },
@@ -3290,14 +3219,14 @@ export default function ChessAnalyzer({
             </div>
 
             {/* ── Footer ──────────────────────────────────────────────────── */}
-            <div className="flex-shrink-0 px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3 bg-zinc-50/80 dark:bg-zinc-900/80 rounded-b-2xl">
+            <div className="flex-shrink-0 px-4 sm:px-6 py-3 sm:py-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3 bg-zinc-50/80 dark:bg-zinc-900/80 rounded-b-2xl">
               <p className="text-xs text-zinc-400 dark:text-zinc-500 italic hidden sm:block">
                 Tap any move in the list to explore it in depth.
               </p>
               <button
                 onClick={() => setShowGameSummary(false)}
                 style={{ touchAction: 'manipulation' }}
-                className="ml-auto px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-bold transition-colors shadow-sm flex items-center gap-2 select-none"
+                className="w-full sm:w-auto sm:ml-auto px-5 py-2.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs sm:text-sm font-bold transition-colors shadow-sm flex items-center justify-center gap-2 select-none"
               >
                 Continue Analysis <span className="opacity-75">→</span>
               </button>
@@ -3306,6 +3235,22 @@ export default function ChessAnalyzer({
           </div>
         </div>
       )}
+
+      {/* Last 6 Games Performance Review Modal */}
+      <RecentGamesReviewModal
+        isOpen={showRecentSummaryModal}
+        onClose={() => setShowRecentSummaryModal(false)}
+        summary={recentAnalysisSummary}
+        onSelectGame={(pgn, title, rawGame) => {
+          if (rawGame) {
+            loadChesscomGame(rawGame);
+          } else if (pgn) {
+            setPgnText(pgn);
+            loadPgnString(pgn);
+          }
+          setShowRecentSummaryModal(false);
+        }}
+      />
 
     </>
   );

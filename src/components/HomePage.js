@@ -1,6 +1,7 @@
 'use client';
-
 import React, { useState } from 'react';
+import { analyzeLast6Games } from '../utils/recentGamesAnalysis';
+import RecentGamesReviewModal from './RecentGamesReviewModal';
 
 // Curated collection of Recent Trending and Historic Masterpiece games
 const CURATED_GAMES = {
@@ -189,6 +190,8 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [userError, setUserError] = useState('');
+  const [showRecentSummaryModal, setShowRecentSummaryModal] = useState(false);
+  const [recentAnalysisSummary, setRecentAnalysisSummary] = useState(null);
 
   // Tab 3: Raw PGN
   const [customPgn, setCustomPgn] = useState('');
@@ -246,7 +249,7 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
 
     try {
       const offset = isLoadMore ? nextOffset : 0;
-      const res = await fetch(`/api/chesscom?username=${encodeURIComponent(user)}&limit=5&offset=${offset}`);
+      const res = await fetch(`/api/chesscom?username=${encodeURIComponent(user)}&limit=6&offset=${offset}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -256,11 +259,19 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
       }
 
       if (isLoadMore) {
-        setGames((prev) => [...prev, ...data.games]);
+        const merged = [...games, ...data.games];
+        setGames(merged);
+        const summary = analyzeLast6Games(merged, user);
+        setRecentAnalysisSummary(summary);
       } else {
-        setGames(data.games || []);
-        if (data.games && data.games.length === 0) {
+        const newGames = data.games || [];
+        setGames(newGames);
+        if (newGames.length === 0) {
           setUserError(`No recent games found for "${user}".`);
+          setRecentAnalysisSummary(null);
+        } else {
+          const summary = analyzeLast6Games(newGames, user);
+          setRecentAnalysisSummary(summary);
         }
       }
 
@@ -352,33 +363,33 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
         <div className="flex border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40">
           <button
             onClick={() => setActiveTab('link')}
-            className={`flex-1 py-3.5 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+            className={`flex-1 py-3 sm:py-3.5 px-2 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 ${
               activeTab === 'link'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-zinc-900'
                 : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
             }`}
           >
-            <span>🔗</span> Paste Game Link
+            <span>🔗</span> <span className="truncate">Game Link</span>
           </button>
           <button
             onClick={() => setActiveTab('username')}
-            className={`flex-1 py-3.5 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+            className={`flex-1 py-3 sm:py-3.5 px-2 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 ${
               activeTab === 'username'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-zinc-900'
                 : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
             }`}
           >
-            <span>♟️</span> Chess.com Profile
+            <span>♟️</span> <span className="truncate">Profile</span>
           </button>
           <button
             onClick={() => setActiveTab('pgn')}
-            className={`flex-1 py-3.5 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+            className={`flex-1 py-3 sm:py-3.5 px-2 text-center text-xs sm:text-sm font-bold border-b-2 transition-colors flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 ${
               activeTab === 'pgn'
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-zinc-900'
                 : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
             }`}
           >
-            <span>📝</span> Paste / Upload PGN
+            <span>📝</span> <span className="truncate">PGN</span>
           </button>
         </div>
 
@@ -471,10 +482,68 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
 
             {/* Games List */}
             {games.length > 0 && (
-              <div className="flex flex-col gap-2.5 mt-4">
-                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
-                  Latest Matches ({games.length} retrieved)
-                </span>
+              <div className="flex flex-col gap-3 mt-4">
+                {/* Last 6 Games Performance Review Banner */}
+                {recentAnalysisSummary && (
+                  <div className="p-4 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-gradient-to-r from-blue-50/90 via-indigo-50/50 to-emerald-50/50 dark:from-blue-950/40 dark:via-indigo-950/30 dark:to-emerald-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-start sm:items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 flex items-center justify-center text-xl shrink-0 shadow-2xs">
+                        {recentAnalysisSummary.trend.icon}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-extrabold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100">
+                            {recentAnalysisSummary.trend.title}
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${recentAnalysisSummary.trend.badgeClass}`}>
+                            {recentAnalysisSummary.winRate}% Win Rate ({recentAnalysisSummary.wins}W - {recentAnalysisSummary.losses}L)
+                          </span>
+                          {recentAnalysisSummary.ratingDelta !== 0 && (
+                            <span
+                              className={`text-[10px] font-mono font-extrabold ${
+                                recentAnalysisSummary.ratingDelta > 0
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-orange-600 dark:text-orange-400'
+                              }`}
+                            >
+                              {recentAnalysisSummary.ratingDelta > 0
+                                ? `+${recentAnalysisSummary.ratingDelta}`
+                                : recentAnalysisSummary.ratingDelta}{' '}
+                              pts
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5 line-clamp-1">
+                          {recentAnalysisSummary.trend.summary}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setShowRecentSummaryModal(true)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
+                    >
+                      <span>📊</span>
+                      <span>Review Last 6 Games</span>
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
+                    Latest Matches ({games.length} retrieved)
+                  </span>
+                  {recentAnalysisSummary && (
+                    <button
+                      onClick={() => setShowRecentSummaryModal(true)}
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold flex items-center gap-1"
+                    >
+                      <span>Quick Report</span>
+                      <span>→</span>
+                    </button>
+                  )}
+                </div>
+
                 <div className="flex flex-col gap-2">
                   {games.map((game) => (
                     <div
@@ -511,7 +580,7 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
                     disabled={userLoading}
                     className="w-full py-2.5 mt-2 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-bold rounded-xl transition-colors"
                   >
-                    {userLoading ? 'Importing more...' : '⬇ Import 5 More Games'}
+                    {userLoading ? 'Importing more...' : '⬇ Import 6 More Games'}
                   </button>
                 )}
               </div>
@@ -680,6 +749,14 @@ export default function HomePage({ onSelectGame, isDark, toggleDarkMode }) {
           </div>
         )}
       </div>
+
+      {/* Last 6 Games Performance Review Modal */}
+      <RecentGamesReviewModal
+        isOpen={showRecentSummaryModal}
+        onClose={() => setShowRecentSummaryModal(false)}
+        summary={recentAnalysisSummary}
+        onSelectGame={(pgn, title) => onSelectGame(pgn, title)}
+      />
     </div>
   );
 }
