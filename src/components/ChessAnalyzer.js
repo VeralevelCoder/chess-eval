@@ -1030,17 +1030,20 @@ export default function ChessAnalyzer({
     setIsAnalyzingAll(false);
   };
 
-  // Navigation handlers
-  const goToStart = () => setCurrentMoveIndex(0);
-  const goToPrev = () => setCurrentMoveIndex((prev) => Math.max(0, prev - 1));
-  const goToNext = () => setCurrentMoveIndex((prev) => Math.min(moves.length, prev + 1));
-  const goToEnd = () => setCurrentMoveIndex(moves.length);
+  // Navigation handlers — also clear any active preview synchronously
+  // so mobile doesn't show a stale board position between the tap and the useEffect cleanup
+  const goToStart = () => { setPreviewState(null); setCurrentMoveIndex(0); };
+  const goToPrev = () => { setPreviewState(null); setCurrentMoveIndex((prev) => Math.max(0, prev - 1)); };
+  const goToNext = () => { setPreviewState(null); setCurrentMoveIndex((prev) => Math.min(moves.length, prev + 1)); };
+  const goToEnd = () => { setPreviewState(null); setCurrentMoveIndex(moves.length); };
+
 
   // Jump to Next / Prev Blunder
   const goToNextBlunder = () => {
     for (let i = currentMoveIndex + 1; i <= moves.length; i++) {
       const cls = moveClassifications[i];
       if (cls && (cls.type === 'blunder' || cls.type === 'mistake')) {
+        setPreviewState(null);
         setCurrentMoveIndex(i);
         return;
       }
@@ -1051,11 +1054,13 @@ export default function ChessAnalyzer({
     for (let i = currentMoveIndex - 1; i >= 1; i--) {
       const cls = moveClassifications[i];
       if (cls && (cls.type === 'blunder' || cls.type === 'mistake')) {
+        setPreviewState(null);
         setCurrentMoveIndex(i);
         return;
       }
     }
   };
+
 
   // Keyboard navigation
   useEffect(() => {
@@ -1322,7 +1327,7 @@ export default function ChessAnalyzer({
           </div>
 
           {/* Move Navigation Controls */}
-          <div className="flex items-center justify-center gap-2 mt-4 w-full max-w-[500px]">
+          <div className="flex items-center justify-center gap-2 mt-4 w-full max-w-[500px] select-none" style={{ touchAction: 'manipulation' }}>
             <button
               onClick={goToStart}
               disabled={currentMoveIndex === 0}
@@ -1358,6 +1363,12 @@ export default function ChessAnalyzer({
           </div>
 
           {/* Quick Blunder Jumper & Progress */}
+          <button
+            onClick={handleAutoAnalyze}
+            className="px-3 py-1.5 text-xs font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-xs flex items-center gap-1.5"
+          >
+            Analyze Game
+          </button>`
           <div className="flex items-center justify-between gap-2 mt-2 w-full max-w-[500px] text-xs">
             <button
               onClick={goToPrevBlunder}
@@ -1545,6 +1556,7 @@ export default function ChessAnalyzer({
                 <button
                   onClick={handlePreviewAlternative}
                   disabled={previewState?.moveSan === previousAlternative.san}
+                  style={{ touchAction: 'manipulation' }}
                   className="self-start px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5"
                 >
                   <span>👀</span>
@@ -1569,6 +1581,7 @@ export default function ChessAnalyzer({
                   <button
                     onClick={handlePreviewBestMove}
                     disabled={previewState?.moveSan === currentBestMove.san}
+                    style={{ touchAction: 'manipulation' }}
                     className="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5"
                   >
                     <span>👀</span>
@@ -1740,7 +1753,7 @@ export default function ChessAnalyzer({
                       return (
                         <button
                           key={idx}
-                          onClick={() => setCurrentMoveIndex(idx + 1)}
+                          onClick={() => { setPreviewState(null); setCurrentMoveIndex(idx + 1); }}
                           className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
                             isSelected
                               ? 'bg-blue-600 text-white font-bold'
@@ -1777,7 +1790,7 @@ export default function ChessAnalyzer({
                   {/* Game Outcome Conclusion Pill at bottom of Move List */}
                   {(gameTermination || gameHeaders.Result) && (
                     <button
-                      onClick={() => setCurrentMoveIndex(moves.length)}
+                      onClick={() => { setPreviewState(null); setCurrentMoveIndex(moves.length); }}
                       className={`mt-1 w-full py-1.5 px-2.5 rounded-lg border text-xs font-semibold flex items-center justify-between transition-colors ${
                         currentMoveIndex === moves.length
                           ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300'
