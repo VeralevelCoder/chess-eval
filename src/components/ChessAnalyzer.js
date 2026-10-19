@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Chess } from 'chess.js';
-import { Chessboard } from 'react-chessboard';
+import { Chessboard, defaultArrowOptions } from 'react-chessboard';
 import useStockfish from '../hooks/useStockfish';
 
 const SAMPLE_PGN = `[Event "Paris Opera"]
@@ -599,6 +599,9 @@ export default function ChessAnalyzer({
 
   // Cache evaluations by move index
   const [evalCache, setEvalCache] = useState({});
+  const requestedFenRef = useRef(null); // Tracks which FEN the live evaluator is allowed to update
+
+  // Auto-analysis state
 
   // Auto-analysis state
   const [isAnalyzingAll, setIsAnalyzingAll] = useState(false);
@@ -719,6 +722,7 @@ export default function ChessAnalyzer({
         setMoves(parsedMoves);
         setCurrentMoveIndex(0);
         setEvalCache({});
+        setPreviewState(null);
         setErrorMsg('');
         setIsAnalyzingAll(false);
         setActiveGameId(data.gameId);
@@ -778,6 +782,7 @@ export default function ChessAnalyzer({
       setMoves(parsedMoves);
       setCurrentMoveIndex(0);
       setEvalCache({});
+      setPreviewState(null);
       setErrorMsg('');
       setIsAnalyzingAll(false);
       setActiveGameId(gameId);
@@ -810,6 +815,7 @@ export default function ChessAnalyzer({
     if (!isReady || !currentFen || isAnalyzingAll) return;
 
     if (!evalCache[currentMoveIndex]) {
+      requestedFenRef.current = currentFen; // Lock the FEN we expect to receive
       evaluatePosition(currentFen, evalDepth);
     }
   }, [currentMoveIndex, currentFen, evalDepth, isReady, evaluatePosition, evalCache, isAnalyzingAll]);
@@ -817,14 +823,18 @@ export default function ChessAnalyzer({
   // Store live evaluation in cache
   useEffect(() => {
     if (evaluation && evaluation.depth > 0 && !isAnalyzingAll) {
-      setEvalCache((prev) => ({
-        ...prev,
-        [currentMoveIndex]: {
-          ...evaluation,
-        },
-      }));
+      // ONLY save if the FEN matches the one we explicitly requested via live evaluation
+      if (currentFen === requestedFenRef.current) {
+        setEvalCache((prev) => ({
+          ...prev,
+          [currentMoveIndex]: {
+            ...evaluation,
+          },
+        }));
+      }
     }
-  }, [evaluation, currentMoveIndex, isAnalyzingAll]);
+  }, [evaluation, currentMoveIndex, currentFen, isAnalyzingAll]);
+
 
   // Active evaluation to display for the selected move
   const activeEval = evalCache[currentMoveIndex] || evaluation;
@@ -957,67 +967,66 @@ export default function ChessAnalyzer({
     };
   }, [currentMoveIndex, moves, currentClassification, evalCache]);
 
+  // Helper to format an arrow object with startSquare, endSquare, color and numeric indices
+  const formatArrow = (from, to, color) => ({
+    startSquare: from,
+    endSquare: to,
+    color,
+    0: from,
+    1: to,
+    2: color,
+  });
+
   // Guide lines arrows on the chessboard
+  // Colors are strictly STATIC and UNIQUE:
+  // - Played Move: Royal Blue (#3b82f6)
+  // - Best Move: Emerald Green (#10b981)
+  // - Alternative Move: Cyan (#06b6d4)
   const boardArrows = useMemo(() => {
     if (!showGuideLines) return [];
 
-    // If currently previewing a move, draw arrow for that move
+    // If currently previewing a move, draw arrow for that move in its dedicated static color
     if (previewState && previewState.from && previewState.to) {
-      return [
-        {
-          startSquare: previewState.from,
-          endSquare: previewState.to,
-          color: '#10b981',
-        },
-      ];
+      const arrowColor = previewState.type === 'alternative' ? '#06b6d4' : '#10b981';
+      return [formatArrow(previewState.from, previewState.to, arrowColor)];
     }
 
     const arrows = [];
 
-    // 1. Played move arrow
+    // 1. Played move arrow — STATIC UNIQUE COLOR: Royal Blue (#3b82f6)
     if (showPlayedMoveArrow && currentMoveIndex > 0 && moves[currentMoveIndex - 1]) {
       const move = moves[currentMoveIndex - 1];
-      const cls = currentClassification?.type;
-      let color = '#3b82f6';
-      if (cls === 'best' || cls === 'excellent' || cls === 'checkmate') {
-        color = '#10b981';
-      } else if (cls === 'inaccuracy') {
-        color = '#f59e0b';
-      } else if (cls === 'mistake') {
-        color = '#f97316';
-      } else if (cls === 'blunder') {
-        color = '#ef4444';
+      if (/^[a-h][1-8]$/.test(move.from) && /^[a-h][1-8]$/.test(move.to)) {
+        arrows.push(formatArrow(move.from, move.to, '#3b82f6'));
       }
-      arrows.push({
-        startSquare: move.from,
-        endSquare: move.to,
-        color,
-      });
     }
 
-    // 2. Best move suggestion arrow for current position
+    // 2. Best move suggestion arrow for current position — STATIC UNIQUE COLOR: Emerald Green (#10b981)
     if (showBestMoveArrow && currentBestMove && currentBestMove.from && currentBestMove.to) {
       if (/^[a-h][1-8]$/.test(currentBestMove.from) && /^[a-h][1-8]$/.test(currentBestMove.to)) {
-        arrows.push({
-          startSquare: currentBestMove.from,
-          endSquare: currentBestMove.to,
-          color: '#10b981',
-        });
+        arrows.push(formatArrow(currentBestMove.from, currentBestMove.to, '#10b981'));
       }
     }
 
-    // 3. Alternative arrow for mistakes (what should have been played)
+    // 3. Alternative arrow for mistakes (what should have been played) — STATIC UNIQUE COLOR: Cyan (#06b6d4)
     if (showAlternativeArrow && previousAlternative && previousAlternative.from && previousAlternative.to) {
       if (/^[a-h][1-8]$/.test(previousAlternative.from) && /^[a-h][1-8]$/.test(previousAlternative.to)) {
-        arrows.push({
-          startSquare: previousAlternative.from,
-          endSquare: previousAlternative.to,
-          color: '#06b6d4',
-        });
+        arrows.push(formatArrow(previousAlternative.from, previousAlternative.to, '#06b6d4'));
       }
     }
 
-    return arrows;
+    // Deduplicate arrows using a Map to ensure strictly unique start/end pairs
+    const uniqueArrowsMap = new Map();
+    arrows.forEach((arrow) => {
+      const from = arrow.startSquare || arrow[0];
+      const to = arrow.endSquare || arrow[1];
+      const key = `${from}-${to}`;
+      if (!uniqueArrowsMap.has(key)) {
+        uniqueArrowsMap.set(key, arrow);
+      }
+    });
+
+    return Array.from(uniqueArrowsMap.values());
   }, [
     showGuideLines,
     showPlayedMoveArrow,
@@ -1025,87 +1034,52 @@ export default function ChessAnalyzer({
     showAlternativeArrow,
     currentMoveIndex,
     moves,
-    currentClassification,
     currentBestMove,
     previousAlternative,
     previewState,
   ]);
 
-  // Square highlighting for played moves and best move suggestions
+  // Square highlighting for played moves (piece movement indicator) and preview states
+  // Colors are strictly STATIC and UNIQUE:
+  // - Played Move: Royal Blue (rgba(59, 130, 246, 0.25) origin, rgba(59, 130, 246, 0.35) + #3b82f6 border destination)
+  // - Best Move Preview: Emerald Green (rgba(16, 185, 129, 0.25) origin, rgba(16, 185, 129, 0.35) + #10b981 border destination)
+  // - Alternative Move Preview: Cyan (rgba(6, 182, 212, 0.25) origin, rgba(6, 182, 212, 0.35) + #06b6d4 border destination)
   const boardSquareStyles = useMemo(() => {
     const styles = {};
-    if (!showGuideLines) return styles;
 
+    // 1. Highlight preview move squares if currently previewing
     if (previewState) {
+      const isAlt = previewState.type === 'alternative';
+      const bg = isAlt ? 'rgba(6, 182, 212, 0.25)' : 'rgba(16, 185, 129, 0.25)';
+      const targetBg = isAlt ? 'rgba(6, 182, 212, 0.35)' : 'rgba(16, 185, 129, 0.35)';
+      const border = isAlt ? '#06b6d4' : '#10b981';
+
       if (previewState.from) {
-        styles[previewState.from] = { backgroundColor: 'rgba(16, 185, 129, 0.25)' };
+        styles[previewState.from] = { backgroundColor: bg };
       }
       if (previewState.to) {
         styles[previewState.to] = {
-          backgroundColor: 'rgba(16, 185, 129, 0.35)',
-          boxShadow: 'inset 0 0 0 2px #10b981',
+          backgroundColor: targetBg,
+          boxShadow: `inset 0 0 0 2px ${border}`,
         };
       }
       return styles;
     }
 
-    // Highlight played move squares
-    if (showPlayedMoveArrow && currentMoveIndex > 0 && moves[currentMoveIndex - 1]) {
+    // 2. Highlight played move squares (indicating piece movement) — STATIC ROYAL BLUE
+    if (currentMoveIndex > 0 && moves[currentMoveIndex - 1]) {
       const move = moves[currentMoveIndex - 1];
-      const cls = currentClassification?.type;
-      let bg = 'rgba(59, 130, 246, 0.2)';
-      if (cls === 'blunder') bg = 'rgba(239, 68, 68, 0.25)';
-      else if (cls === 'mistake') bg = 'rgba(249, 115, 22, 0.25)';
-      else if (cls === 'inaccuracy') bg = 'rgba(245, 158, 11, 0.2)';
-      else if (cls === 'best' || cls === 'excellent') bg = 'rgba(16, 185, 129, 0.2)';
-
-      styles[move.from] = { backgroundColor: bg };
-      styles[move.to] = { backgroundColor: bg };
-    }
-
-    // Highlight best move squares
-    if (showBestMoveArrow && currentBestMove) {
-      const { from, to } = currentBestMove;
-      if (/^[a-h][1-8]$/.test(from) && /^[a-h][1-8]$/.test(to)) {
-        styles[from] = {
-          ...(styles[from] || {}),
-          boxShadow: 'inset 0 0 0 2px #10b981',
-        };
-        styles[to] = {
-          ...(styles[to] || {}),
-          backgroundColor: 'rgba(16, 185, 129, 0.28)',
-          boxShadow: 'inset 0 0 0 2px #10b981',
-        };
-      }
-    }
-
-    // Highlight alternative squares if mistake
-    if (showAlternativeArrow && previousAlternative) {
-      const { from, to } = previousAlternative;
-      if (/^[a-h][1-8]$/.test(from) && /^[a-h][1-8]$/.test(to)) {
-        styles[from] = {
-          ...(styles[from] || {}),
-          boxShadow: 'inset 0 0 0 2px #06b6d4',
-        };
-        styles[to] = {
-          ...(styles[to] || {}),
-          backgroundColor: 'rgba(6, 182, 212, 0.25)',
-          boxShadow: 'inset 0 0 0 2px #06b6d4',
-        };
-      }
+      styles[move.from] = { backgroundColor: 'rgba(59, 130, 246, 0.25)' };
+      styles[move.to] = {
+        backgroundColor: 'rgba(59, 130, 246, 0.35)',
+        boxShadow: 'inset 0 0 0 2px #3b82f6',
+      };
     }
 
     return styles;
   }, [
-    showGuideLines,
-    showPlayedMoveArrow,
-    showBestMoveArrow,
-    showAlternativeArrow,
     currentMoveIndex,
     moves,
-    currentClassification,
-    currentBestMove,
-    previousAlternative,
     previewState,
   ]);
 
@@ -1117,6 +1091,7 @@ export default function ChessAnalyzer({
       moveSan: currentBestMove.san,
       from: currentBestMove.from,
       to: currentBestMove.to,
+      type: 'best',
       description: `Best Move: ${currentBestMove.san}`,
     });
   };
@@ -1128,6 +1103,7 @@ export default function ChessAnalyzer({
       moveSan: previousAlternative.san,
       from: previousAlternative.from,
       to: previousAlternative.to,
+      type: 'alternative',
       description: `Alternative for move ${moves[currentMoveIndex - 1]?.moveNumber}: ${previousAlternative.san}`,
     });
   };
@@ -1139,6 +1115,7 @@ export default function ChessAnalyzer({
       moveSan: step.san,
       from: step.from,
       to: step.to,
+      type: 'best',
       description: `Line step: ${step.turn === 'w' ? step.moveNum + '.' : step.moveNum + '...'} ${step.san}`,
     });
   };
@@ -1153,6 +1130,7 @@ export default function ChessAnalyzer({
     if (!isReady || moves.length === 0) return;
     setIsAnalyzingAll(true);
     cancelAnalysisRef.current = false;
+    requestedFenRef.current = null;
 
     // ── localCache: a plain JS object kept in sync during the loop.
     // React's setEvalCache is async, so evalCache state can't be read back
@@ -1217,11 +1195,13 @@ export default function ChessAnalyzer({
     }
   };
 
-  const cancelFullGameAnalysis = () => {
+    const cancelFullGameAnalysis = () => {
     cancelAnalysisRef.current = true;
     stop();
+    requestedFenRef.current = null; // Invalidate live tracking
     setIsAnalyzingAll(false);
   };
+
 
   // Navigation handlers — also clear any active preview synchronously
   // so mobile doesn't show a stale board position between the tap and the useEffect cleanup
@@ -1465,16 +1445,33 @@ export default function ChessAnalyzer({
         <div className="lg:col-span-7 flex flex-col items-center">
           {/* Active Move Preview Banner */}
           {previewState && (
-            <div className="w-full max-w-[500px] mb-3 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-700 flex items-center justify-between gap-2 shadow-xs transition-all">
-              <div className="flex items-center gap-2 text-xs text-emerald-900 dark:text-emerald-200">
+            <div
+              className={`w-full max-w-[500px] mb-3 p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition-all ${
+                previewState.type === 'alternative'
+                  ? 'bg-cyan-50 dark:bg-cyan-950/80 border-cyan-300 dark:border-cyan-700 text-cyan-900 dark:text-cyan-200'
+                  : 'bg-emerald-50 dark:bg-emerald-950/80 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-xs">
                 <span className="text-base">👀</span>
                 <span>
-                  Previewing: <strong className="font-bold underline decoration-emerald-500">{previewState.description}</strong>
+                  Previewing:{' '}
+                  <strong
+                    className={`font-bold underline ${
+                      previewState.type === 'alternative' ? 'decoration-cyan-500' : 'decoration-emerald-500'
+                    }`}
+                  >
+                    {previewState.description}
+                  </strong>
                 </span>
               </div>
               <button
                 onClick={() => setPreviewState(null)}
-                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors flex items-center gap-1"
+                className={`px-2.5 py-1 text-xs font-bold rounded-lg text-white shadow-xs transition-colors flex items-center gap-1 ${
+                  previewState.type === 'alternative'
+                    ? 'bg-cyan-600 hover:bg-cyan-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
                 title="Return to actual game position"
               >
                 <span>✕</span>
@@ -1512,8 +1509,9 @@ export default function ChessAnalyzer({
                   squareStyles: boardSquareStyles,
                   allowDrawingArrows: true,
                   arrowOptions: {
-                    arrowWidthDenominator: 6,
-                    opacity: 0.75,
+                    ...defaultArrowOptions,
+                    arrowWidthDenominator: 5,
+                    opacity: 0.8,
                   },
                 }}
               />

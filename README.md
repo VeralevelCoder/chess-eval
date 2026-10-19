@@ -34,20 +34,15 @@
 ---
 
 ### 2. 🎯 Visual Guide Lines & Interactive Board Arrows
-* **🟢 Best Move Arrow (Emerald Green):**
-  * Displays a guide arrow directly on the board pointing out Stockfish's top recommended move for the player to move.
-* **🔵/🚨 Color-Coded Played Move Arrow:**
-  * Displays the trajectory of the move just played, color-coded by quality:
-    * 🌟 **Best / Excellent:** Emerald green (`#10b981`)
-    * 👍 **Good:** Blue (`#3b82f6`)
-    * ⚠️ **Inaccuracy:** Amber (`#f59e0b`)
-    * ❌ **Mistake:** Orange (`#f97316`)
-    * 🚨 **Blunder:** Red (`#ef4444`)
-* **💡 Alternative Arrow for Mistakes (Cyan):**
-  * When reviewing an inaccuracy, mistake, or blunder, a cyan guide arrow appears indicating what move *should* have been played instead.
+* **🔵 Played Move (Royal Blue - `#3b82f6`):**
+  * Displays a static blue guide arrow and subtle blue square highlights on origin and destination squares indicating the piece movement. Color remains constant across all moves.
+* **🟢 Best Move Arrow (Emerald Green - `#10b981`):**
+  * Displays a static emerald green guide arrow directly on the board pointing out Stockfish's top recommended move for the player to move.
+* **💡 Alternative Arrow for Mistakes (Cyan - `#06b6d4`):**
+  * When reviewing an inaccuracy, mistake, or blunder, a static cyan guide arrow appears indicating what move *should* have been played instead.
 * **Square Highlights (`squareStyles`):**
-  * Origin and destination squares of the played move are subtly tinted to match move quality.
-  * Recommended best move start and target squares glow with emerald target indicators.
+  * Origin and destination squares of the played move are highlighted in soft blue to clearly show piece movement.
+  * Previewing best or alternative moves displays dedicated green or cyan square highlights.
 * **Custom User Drawing:**
   * Right-click and drag on the board to draw custom tactical guide arrows anytime.
 * **Guide Lines Toolbar:**

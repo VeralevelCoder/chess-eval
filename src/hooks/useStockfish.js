@@ -22,6 +22,8 @@ export default function useStockfish() {
   const turnRef = useRef('w');
   const currentEvalRef = useRef(evaluation);
   const pendingResolveRef = useRef(null);
+  const isSearchingRef = useRef(false);
+  const readyCallbackRef = useRef(null);
 
   useEffect(() => {
     currentEvalRef.current = evaluation;
@@ -44,12 +46,24 @@ export default function useStockfish() {
     worker.onmessage = (event) => {
       const line = typeof event.data === 'string' ? event.data : '';
 
-      if (line === 'uciok' || line === 'readyok') {
+      if (line === 'uciok') {
         setIsReady(true);
+      }
+
+      if (line === 'readyok') {
+        setIsReady(true);
+        if (readyCallbackRef.current) {
+          const cb = readyCallbackRef.current;
+          readyCallbackRef.current = null;
+          cb();
+        }
       }
 
       // Parse UCI info lines: "info depth 12 ... score cp 35 ... pv e2e4"
       if (line.startsWith('info') && line.includes('score')) {
+        // If an abort / synchronization is in progress, ignore info lines from the old search
+        if (readyCallbackRef.current) return;
+
         const depthMatch = line.match(/depth\s+(\d+)/);
         const depth = depthMatch ? parseInt(depthMatch[1], 10) : 0;
 
@@ -105,6 +119,9 @@ export default function useStockfish() {
       }
 
       if (line.startsWith('bestmove')) {
+        // If an abort / synchronization is in progress, discard the cancelled search's bestmove
+        if (readyCallbackRef.current) return;
+
         const parts = line.split(' ');
         const rawBest = parts[1] || '';
         const bestMove = (rawBest && rawBest !== '(none)') ? rawBest : (currentEvalRef.current.bestMove || '');
@@ -115,6 +132,7 @@ export default function useStockfish() {
         currentEvalRef.current = finalEval;
         setEvaluation(finalEval);
         setEvaluating(false);
+        isSearchingRef.current = false;
 
         if (pendingResolveRef.current) {
           const resolve = pendingResolveRef.current;
@@ -137,63 +155,95 @@ export default function useStockfish() {
     };
   }, []);
 
-  const evaluatePosition = useCallback((fen, depth = 12) => {
+  // Stop any active search cleanly and wait for readyok before issuing a new command
+  const stopAndSync = useCallback(() => {
+    return new Promise((resolve) => {
+      if (!workerRef.current || !isSearchingRef.current) {
+        resolve();
+        return;
+      }
+
+      readyCallbackRef.current = () => {
+        isSearchingRef.current = false;
+        setEvaluating(false);
+        resolve();
+      };
+
+      workerRef.current.postMessage('stop');
+      workerRef.current.postMessage('isready');
+    });
+  }, []);
+
+  const evaluatePosition = useCallback(async (fen, depth = 12) => {
     if (!workerRef.current) return;
+
+    await stopAndSync();
 
     const parts = fen.split(' ');
     turnRef.current = parts[1] || 'w';
 
     const fresh = {
-      ...currentEvalRef.current,
+      type: 'cp',
+      value: 0,
+      scoreText: '0.00',
+      depth: 0,
       bestMove: '',
       pv: '',
     };
     currentEvalRef.current = fresh;
     setEvaluation(fresh);
 
+    isSearchingRef.current = true;
     setEvaluating(true);
-    workerRef.current.postMessage('stop');
     workerRef.current.postMessage(`position fen ${fen}`);
     workerRef.current.postMessage(`go depth ${depth}`);
-  }, []);
+  }, [stopAndSync]);
 
-  const evaluatePositionAsync = useCallback((fen, depth = 10) => {
+  const evaluatePositionAsync = useCallback(async (fen, depth = 10) => {
+    if (!workerRef.current) {
+      return {
+        type: 'cp',
+        value: 0,
+        scoreText: '0.00',
+        depth: 0,
+        bestMove: '',
+        pv: '',
+      };
+    }
+
+    await stopAndSync();
+
     return new Promise((resolve) => {
-      if (!workerRef.current) {
-        resolve({
-          type: 'cp',
-          value: 0,
-          scoreText: '0.00',
-          depth: 0,
-          bestMove: '',
-          pv: '',
-        });
-        return;
-      }
-
       const parts = fen.split(' ');
       turnRef.current = parts[1] || 'w';
 
       const fresh = {
-        ...currentEvalRef.current,
+        type: 'cp',
+        value: 0,
+        scoreText: '0.00',
+        depth: 0,
         bestMove: '',
         pv: '',
       };
       currentEvalRef.current = fresh;
 
       pendingResolveRef.current = resolve;
+      isSearchingRef.current = true;
       setEvaluating(true);
-      workerRef.current.postMessage('stop');
       workerRef.current.postMessage(`position fen ${fen}`);
       workerRef.current.postMessage(`go depth ${depth}`);
     });
-  }, []);
+  }, [stopAndSync]);
 
   const stop = useCallback(() => {
-    if (workerRef.current) {
+    if (workerRef.current && isSearchingRef.current) {
       workerRef.current.postMessage('stop');
     }
+    isSearchingRef.current = false;
     setEvaluating(false);
+    if (readyCallbackRef.current) {
+      readyCallbackRef.current = null;
+    }
     if (pendingResolveRef.current) {
       pendingResolveRef.current(currentEvalRef.current);
       pendingResolveRef.current = null;
