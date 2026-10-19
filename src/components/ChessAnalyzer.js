@@ -18,8 +18,12 @@ const SAMPLE_PGN = `[Event "Paris Opera"]
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 // Classify move based on evaluation drop from the moving player's perspective
-function classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, bestMove, san) {
-  if (isDeliveredCheckmate || san.includes('#')) {
+// Emotive Visual Vocabulary matching Chess.com:
+// 🌟 Brilliant (Teal), ✨ Great (Blue), 👍 Best (Emerald), ⚡ Excellent (Teal-green),
+// 🟢 Good (Sky), 📖 Book (Amber), ⚠️ Inaccuracy (Yellow), ❌ Mistake (Orange),
+// 🚨 Blunder (Red), ❓ Missed Win (Rose), 👑 Checkmate (Purple)
+function classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, bestMove, san, prevEval = null, currEval = null, moveIndex = 0, isWhite = true) {
+  if (isDeliveredCheckmate || (san && san.includes('#'))) {
     return {
       type: 'checkmate',
       label: 'Checkmate',
@@ -27,6 +31,7 @@ function classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, bestMove, san
       icon: '👑',
       symbol: '#',
       color: 'text-purple-600 dark:text-purple-400',
+      hex: '#a855f7',
     };
   }
 
@@ -38,36 +43,91 @@ function classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, bestMove, san
       icon: '⏳',
       symbol: '',
       color: 'text-zinc-500',
+      hex: '#71717a',
     };
   }
 
-  // evalLoss in centipawns: positive = advantage lost, negative = advantage gained
+  // 1. Missed Win: player was decisively winning before, but dropped significantly or threw the edge
+  if (prevEval && currEval) {
+    const wasWinning = prevEval.type === 'mate'
+      ? (isWhite ? prevEval.value > 0 : prevEval.value < 0)
+      : (isWhite ? prevEval.value >= 250 : prevEval.value <= -250);
+    const isNowDecisiveDrop = evalLoss >= 180;
+    if (wasWinning && isNowDecisiveDrop) {
+      return {
+        type: 'missedWin',
+        label: 'Missed Win',
+        badgeClass: 'bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-700',
+        icon: '❓',
+        symbol: '✖',
+        color: 'text-rose-600 dark:text-rose-400',
+        hex: '#ff3b69',
+      };
+    }
+  }
+
+  // 2. Book Move: standard early opening moves with low loss
+  if (moveIndex > 0 && moveIndex <= 6 && evalLoss <= 25) {
+    return {
+      type: 'book',
+      label: 'Book Move',
+      badgeClass: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700',
+      icon: '📖',
+      symbol: '📖',
+      color: 'text-amber-700 dark:text-amber-400',
+      hex: '#d5a47e',
+    };
+  }
+
+  // 3. Brilliant Move: sharp piece sacrifice or top move in deep winning tactic
+  if (evalLoss <= 10 && currEval && moveIndex > 6) {
+    const isAhead = isWhite
+      ? (currEval.value >= 150 || (currEval.type === 'mate' && currEval.value > 0))
+      : (currEval.value <= -150 || (currEval.type === 'mate' && currEval.value < 0));
+    const isPieceSacrifice = san && (san.includes('x') || san.startsWith('N') || san.startsWith('B') || san.startsWith('R') || san.startsWith('Q'));
+    if (isAhead && isPieceSacrifice && evalLoss <= 2) {
+      return {
+        type: 'brilliant',
+        label: 'Brilliant',
+        badgeClass: 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-300 border-teal-300 dark:border-teal-700',
+        icon: '🌟',
+        symbol: '!!',
+        color: 'text-teal-600 dark:text-teal-400',
+        hex: '#1baca6',
+      };
+    }
+  }
+
+  // 4. evalLoss in centipawns: positive = advantage lost, negative = advantage gained
   if (evalLoss <= 15) {
     return {
       type: 'best',
       label: 'Best Move',
       badgeClass: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700',
-      icon: '🌟',
+      icon: '👍',
       symbol: '★',
       color: 'text-emerald-600 dark:text-emerald-400',
+      hex: '#10b981',
     };
   } else if (evalLoss <= 45) {
     return {
       type: 'excellent',
       label: 'Excellent',
       badgeClass: 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-300 border-teal-300 dark:border-teal-700',
-      icon: '✨',
-      symbol: '!',
+      icon: '⚡',
+      symbol: '✓',
       color: 'text-teal-600 dark:text-teal-400',
+      hex: '#0d9488',
     };
   } else if (evalLoss <= 90) {
     return {
       type: 'good',
       label: 'Good',
       badgeClass: 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-700',
-      icon: '👍',
-      symbol: '✓',
+      icon: '🟢',
+      symbol: '○',
       color: 'text-blue-600 dark:text-blue-400',
+      hex: '#3b82f6',
     };
   } else if (evalLoss <= 180) {
     return {
@@ -77,6 +137,7 @@ function classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, bestMove, san
       icon: '⚠️',
       symbol: '?!',
       color: 'text-amber-600 dark:text-amber-400',
+      hex: '#f59e0b',
     };
   } else if (evalLoss <= 300) {
     return {
@@ -86,6 +147,7 @@ function classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, bestMove, san
       icon: '❌',
       symbol: '?',
       color: 'text-orange-600 dark:text-orange-400',
+      hex: '#f97316',
     };
   } else {
     return {
@@ -95,7 +157,185 @@ function classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, bestMove, san
       icon: '🚨',
       symbol: '??',
       color: 'text-red-600 dark:text-red-400',
+      hex: '#ef4444',
     };
+  }
+}
+
+// Win Probability model from centipawns: WP = 100 / (1 + 10^(-cp / 400))
+function centipawnsToWinProbability(cp, isMate = false) {
+  if (isMate) {
+    return cp > 0 ? 100 : 0;
+  }
+  const clampedCp = Math.max(-1500, Math.min(1500, cp));
+  return 100 / (1 + Math.pow(10, -clampedCp / 400));
+}
+
+// CAPS-style single move accuracy: 103.1668 * exp(-0.04354 * wpLoss) - 3.1669
+function calculateMoveAccuracy(prevScore, currScore, isWhite) {
+  if (!prevScore || !currScore) return 100;
+  const prevCp = prevScore.type === 'mate' ? (prevScore.value > 0 ? 1500 : -1500) : (prevScore.value || 0);
+  const currCp = currScore.type === 'mate' ? (currScore.value > 0 ? 1500 : -1500) : (currScore.value || 0);
+
+  const prevWp = centipawnsToWinProbability(prevCp, prevScore.type === 'mate');
+  const currWp = centipawnsToWinProbability(currCp, currScore.type === 'mate');
+
+  const playerPrevWp = isWhite ? prevWp : 100 - prevWp;
+  const playerCurrWp = isWhite ? currWp : 100 - currWp;
+
+  const wpLoss = Math.max(0, playerPrevWp - playerCurrWp);
+  const acc = 103.1668 * Math.exp(-0.04354 * wpLoss) - 3.1669;
+  return Math.max(0, Math.min(100, acc));
+}
+
+// Helper to determine accuracy tier and badge
+function getAccuracyTier(acc) {
+  if (acc === null || acc === undefined) {
+    return { label: 'Unranked', color: 'text-zinc-400', badgeClass: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500' };
+  }
+  if (acc >= 90) {
+    return { label: 'Masterly', color: 'text-emerald-500', badgeClass: 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
+  }
+  if (acc >= 80) {
+    return { label: 'Great', color: 'text-teal-500', badgeClass: 'bg-teal-100 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-300 dark:border-teal-700' };
+  }
+  if (acc >= 70) {
+    return { label: 'Solid', color: 'text-blue-500', badgeClass: 'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700' };
+  }
+  if (acc >= 55) {
+    return { label: 'Intermediate', color: 'text-amber-500', badgeClass: 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700' };
+  }
+  return { label: 'Developing', color: 'text-orange-500', badgeClass: 'bg-orange-100 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border-orange-300 dark:border-orange-700' };
+}
+
+// Generate friendly Virtual Coach narrative with speech and emotive expressions
+function getVirtualCoachData(move, prevEval, currEval, classification, playerName, isLastMove = false, gameTermination = null, previousAlternative = null) {
+  if (!move) {
+    return {
+      avatar: '🎓',
+      emotion: 'welcome',
+      mood: 'Friendly Guide',
+      title: 'Game Review Ready',
+      speech: 'Welcome to your Game Review! Walk through the game using the navigation controls, or run Auto-Analyze to calculate your full accuracy score and uncover critical moments.',
+      tag: 'Starting Position',
+    };
+  }
+
+  const san = move.san;
+  const who = playerName || (move.isWhite ? 'White' : 'Black');
+  const cls = classification?.type || 'good';
+
+  if (isLastMove && gameTermination) {
+    return {
+      avatar: '👑',
+      emotion: 'victorious',
+      mood: 'Game Finished',
+      title: `${gameTermination.badge}`,
+      speech: `${gameTermination.description} That concludes this match.`,
+      tag: 'Game Outcome',
+    };
+  }
+
+  switch (cls) {
+    case 'brilliant':
+      return {
+        avatar: '🌟',
+        emotion: 'delighted',
+        mood: 'Brilliant Find!',
+        title: 'Outstanding Vision',
+        speech: `Incredible move! ${who} played ${san}, finding a spectacular tactical sacrifice that completely dominates the board.`,
+        tag: 'Brilliant !!',
+      };
+    case 'best':
+      return {
+        avatar: '😄',
+        emotion: 'delighted',
+        mood: 'Engine Top Pick',
+        title: 'Perfect Continuation',
+        speech: `Superb play! ${who} found the absolute best move with ${san}. It maintains optimal coordination and control.`,
+        tag: 'Best Move ★',
+      };
+    case 'excellent':
+      return {
+        avatar: '✨',
+        emotion: 'happy',
+        mood: 'Sharp Choice',
+        title: 'Very Strong',
+        speech: `Excellent choice! ${san} keeps the pressure high and retains almost all positional advantage.`,
+        tag: 'Excellent ✓',
+      };
+    case 'good':
+      return {
+        avatar: '👍',
+        emotion: 'supportive',
+        mood: 'Solid Move',
+        title: 'Natural Continuation',
+        speech: `${san} is a good, reliable move that continues the game plan without major complications.`,
+        tag: 'Good Move ○',
+      };
+    case 'book':
+      return {
+        avatar: '📖',
+        emotion: 'scholarly',
+        mood: 'Opening Theory',
+        title: 'Standard Opening',
+        speech: `${who} plays ${san}, following classical opening theory for development and center control.`,
+        tag: 'Book Move 📖',
+      };
+    case 'inaccuracy':
+      return {
+        avatar: '🤔',
+        emotion: 'thoughtful',
+        mood: 'Minor Slipped Edge',
+        title: 'Room for Improvement',
+        speech: `${san} is slightly imprecise. ${previousAlternative ? `Stockfish preferred ${previousAlternative.san} to maintain more initiative.` : 'There were sharper paths to preserve the advantage.'}`,
+        tag: 'Inaccuracy ?!',
+      };
+    case 'mistake':
+      return {
+        avatar: '🧐',
+        emotion: 'teaching',
+        mood: 'Notable Mistake',
+        title: 'Tough Moment',
+        speech: `${who}'s ${san} surrenders a clear positional advantage. ${previousAlternative ? `Playing ${previousAlternative.san} was significantly stronger.` : 'Try the Retry Mistake puzzle to test the best continuation!'}`,
+        tag: 'Mistake ?',
+      };
+    case 'blunder':
+      return {
+        avatar: '🚨',
+        emotion: 'alert',
+        mood: 'Critical Blunder',
+        title: 'Major Turning Point',
+        speech: `A costly blunder! ${san} shifts the game dramatically. ${previousAlternative ? `The winning move was ${previousAlternative.san}. Can you find it in Retry mode?` : 'Check the Retry widget below to learn the winning tactic.'}`,
+        tag: 'Blunder ??',
+      };
+    case 'missedWin':
+      return {
+        avatar: '❓',
+        emotion: 'alert',
+        mood: 'Missed Opportunity',
+        title: 'Missed Win',
+        speech: `${who} had a decisive winning tactic here, but played ${san} and let the opponent escape!`,
+        tag: 'Missed Win ✖',
+      };
+    case 'checkmate':
+      return {
+        avatar: '👑',
+        emotion: 'victorious',
+        mood: 'Decisive Mate',
+        title: 'Checkmate Delivered',
+        speech: `Checkmate! ${who} closes out the contest with ${san}. No legal moves remain.`,
+        tag: 'Checkmate #',
+      };
+    default:
+      return {
+        avatar: '🎓',
+        emotion: 'neutral',
+        mood: 'Analyzing',
+        title: `${who} played ${san}`,
+        speech: `Evaluating position...`,
+        tag: 'Move Review',
+      };
   }
 }
 
@@ -591,8 +831,15 @@ export default function ChessAnalyzer({
 
   const isDark = externalIsDark !== undefined ? externalIsDark : internalIsDark;
 
-  // Active input mode: 'pgn' | 'chesscom'
+  // Active analysis view mode (Rule 5: Progressive Disclosure): 'review' | 'deep'
+  const [analysisTab, setAnalysisTab] = useState('review');
+
+  // Active input mode: 'pgn' | 'chesscom' | 'link'
   const [activeTab, setActiveTab] = useState('pgn');
+
+  // Interactive "Retry Mistakes" state (Rule 4: Active Remediation)
+  // { blunderMoveIndex, prevFen, blunderSan, targetSan, targetUci, from, to, pieceName, isHintShown, isSolved, attempts, lastAttemptWrong, solvedFen }
+  const [retryState, setRetryState] = useState(null);
 
   // Game & Move states
   const [pgnText, setPgnText] = useState(initialPgn || SAMPLE_PGN);
@@ -880,16 +1127,16 @@ export default function ChessAnalyzer({
         const isWhiteMating = curr.value > 0;
         const playerMated = move.isWhite ? isWhiteMating : !isWhiteMating;
         if (playerMated) {
-          map[i] = classifyMove(0, true, true, curr.bestMove, move.san);
+          map[i] = classifyMove(0, true, true, curr.bestMove, move.san, prev, curr, i, move.isWhite);
         } else {
-          map[i] = classifyMove(500, true, false, curr.bestMove, move.san);
+          map[i] = classifyMove(500, true, false, curr.bestMove, move.san, prev, curr, i, move.isWhite);
         }
         continue;
       }
 
       const evalDiff = curr.value - prev.value;
       const evalLoss = move.isWhite ? -evalDiff : evalDiff;
-      map[i] = classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, curr.bestMove, move.san);
+      map[i] = classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, curr.bestMove, move.san, prev, curr, i, move.isWhite);
     }
     return map;
   }, [moves, evalCache]);
@@ -951,10 +1198,10 @@ export default function ChessAnalyzer({
     return pvToSanList(currentFen, activeEval.pv, 6);
   }, [activeEval, currentFen]);
 
-  // What was best instead of the current move (if current move was a mistake/blunder/inaccuracy)
+  // What was best instead of the current move (if current move was a mistake/blunder/inaccuracy/missedWin)
   const previousAlternative = useMemo(() => {
     if (currentMoveIndex === 0) return null;
-    const isError = ['inaccuracy', 'mistake', 'blunder'].includes(currentClassification?.type);
+    const isError = ['inaccuracy', 'mistake', 'blunder', 'missedWin'].includes(currentClassification?.type);
     if (!isError) return null;
 
     const prevFen = currentMoveIndex > 1 ? moves[currentMoveIndex - 2]?.fen : START_FEN;
@@ -982,6 +1229,227 @@ export default function ChessAnalyzer({
     };
   }, [currentMoveIndex, moves, currentClassification, evalCache]);
 
+  // Rule 1: CAPS Game Accuracy scores (0-100%) for White and Black
+  const accuracyScores = useMemo(() => {
+    let whiteSum = 0, whiteCount = 0;
+    let blackSum = 0, blackCount = 0;
+
+    for (let i = 1; i <= moves.length; i++) {
+      const prev = evalCache[i - 1];
+      const curr = evalCache[i];
+      if (!prev || !curr) continue;
+
+      const isWhite = moves[i - 1]?.isWhite;
+      const acc = calculateMoveAccuracy(prev, curr, isWhite);
+
+      if (isWhite) {
+        whiteSum += acc;
+        whiteCount++;
+      } else {
+        blackSum += acc;
+        blackCount++;
+      }
+    }
+
+    const whiteAcc = whiteCount > 0 ? (whiteSum / whiteCount).toFixed(1) : null;
+    const blackAcc = blackCount > 0 ? (blackSum / blackCount).toFixed(1) : null;
+    const hasData = whiteCount > 0 || blackCount > 0;
+
+    return {
+      white: whiteAcc !== null ? parseFloat(whiteAcc) : null,
+      black: blackAcc !== null ? parseFloat(blackAcc) : null,
+      hasData,
+      whiteCount,
+      blackCount,
+    };
+  }, [moves, evalCache]);
+
+  // Rule 3: Visual Narrative Advantage Graph Data (Interactive SVG below board)
+  const gameGraphData = useMemo(() => {
+    if (moves.length === 0) {
+      return { linePath: '', whiteArea: '', blackArea: '', blunderDots: [], currentPoint: null };
+    }
+
+    const n = moves.length;
+    const points = [];
+    const blunderDots = [];
+
+    // Helper to map centipawns to Y coordinate (viewBox 0 0 500 74, midline at 37)
+    const getY = (evalObj) => {
+      if (!evalObj) return 37;
+      let cp = evalObj.value || 0;
+      if (evalObj.type === 'mate') {
+        cp = evalObj.value > 0 ? 600 : -600;
+      }
+      const clamped = Math.max(-600, Math.min(600, cp));
+      return 37 - (clamped / 600) * 31;
+    };
+
+    // Point 0 (initial position)
+    const x0 = 10;
+    const y0 = getY(evalCache[0]);
+    points.push({ x: x0, y: y0, moveIndex: 0 });
+
+    for (let i = 1; i <= n; i++) {
+      const x = 10 + (i / n) * 480;
+      const y = getY(evalCache[i]);
+      points.push({ x, y, moveIndex: i });
+
+      const cls = moveClassifications[i];
+      if (cls && (cls.type === 'blunder' || cls.type === 'mistake' || cls.type === 'missedWin')) {
+        blunderDots.push({
+          x,
+          y,
+          isBlunder: cls.type === 'blunder' || cls.type === 'missedWin',
+          title: `Move ${i}: ${moves[i - 1]?.san} (${cls.label})`,
+          moveIndex: i,
+        });
+      }
+    }
+
+    // Build line path
+    const linePath = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+
+    // White Area (advantage above midline y=37)
+    const whitePoints = points.map(p => ({ x: p.x, y: Math.min(37, p.y) }));
+    const whiteArea = `M 10 37 L ${whitePoints.map(p => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' L ')} L 490 37 Z`;
+
+    // Black Area (advantage below midline y=37)
+    const blackPoints = points.map(p => ({ x: p.x, y: Math.max(37, p.y) }));
+    const blackArea = `M 10 37 L ${blackPoints.map(p => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' L ')} L 490 37 Z`;
+
+    const currentPoint = points[currentMoveIndex] || points[0];
+
+    return {
+      linePath,
+      whiteArea,
+      blackArea,
+      blunderDots,
+      currentPoint,
+    };
+  }, [moves, evalCache, moveClassifications, currentMoveIndex]);
+
+  // Rule 3: Friendly Virtual Coach Data
+  const currentVirtualCoach = useMemo(() => {
+    if (currentMoveIndex === 0) {
+      return getVirtualCoachData(null, null, activeEval, { type: 'neutral' }, 'White', false, null, null);
+    }
+    const move = moves[currentMoveIndex - 1];
+    const prevEval = evalCache[currentMoveIndex - 1];
+    const currEval = evalCache[currentMoveIndex];
+    const classification = moveClassifications[currentMoveIndex] || { type: 'evaluating', label: 'Analyzing' };
+    const playerName = move?.isWhite ? (gameHeaders.White || 'White') : (gameHeaders.Black || 'Black');
+    const isLastMove = currentMoveIndex === moves.length;
+
+    return getVirtualCoachData(move, prevEval, currEval, classification, playerName, isLastMove, gameTermination, previousAlternative);
+  }, [currentMoveIndex, moves, evalCache, moveClassifications, gameHeaders, gameTermination, previousAlternative, activeEval]);
+
+  // Rule 4: Interactive Retry Mode Handlers
+  const handleStartRetry = () => {
+    if (currentMoveIndex === 0 || !previousAlternative) return;
+    const prevFen = currentMoveIndex > 1 ? moves[currentMoveIndex - 2]?.fen : START_FEN;
+    const blunderMove = moves[currentMoveIndex - 1];
+
+    let pieceName = 'piece';
+    try {
+      const c = new Chess(prevFen);
+      const piece = c.get(previousAlternative.from);
+      if (piece) {
+        const names = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
+        pieceName = names[piece.type] || 'piece';
+      }
+    } catch {}
+
+    setPreviewState(null);
+    setRetryState({
+      blunderMoveIndex: currentMoveIndex,
+      prevFen,
+      blunderSan: blunderMove ? blunderMove.san : '',
+      targetSan: previousAlternative.san,
+      targetUci: previousAlternative.uci,
+      from: previousAlternative.from,
+      to: previousAlternative.to,
+      pieceName,
+      isHintShown: false,
+      isSolved: false,
+      attempts: 0,
+      lastAttemptWrong: false,
+      solvedFen: previousAlternative.applied?.fen || prevFen,
+    });
+  };
+
+  const handleExitRetry = () => {
+    setRetryState(null);
+  };
+
+  const handleShowRetryHint = () => {
+    if (!retryState) return;
+    setRetryState((prev) => ({ ...prev, isHintShown: true, lastAttemptWrong: false }));
+  };
+
+  const handleRevealRetrySolution = () => {
+    if (!retryState) return;
+    setRetryState((prev) => ({
+      ...prev,
+      isSolved: true,
+      isHintShown: true,
+      lastAttemptWrong: false,
+    }));
+  };
+
+  const handleRetryPieceDrop = ({ piece, sourceSquare, targetSquare }) => {
+    if (!retryState || retryState.isSolved) return false;
+    try {
+      const game = new Chess(retryState.prevFen);
+      const moveRes = game.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: 'q',
+      });
+      if (!moveRes) {
+        setRetryState((prev) => ({ ...prev, lastAttemptWrong: true }));
+        return false;
+      }
+
+      const playedUci = `${sourceSquare}${targetSquare}${moveRes.promotion ? 'q' : ''}`;
+      const targetUci = retryState.targetUci;
+      const isCorrect =
+        playedUci === targetUci ||
+        `${sourceSquare}${targetSquare}` === targetUci.slice(0, 4) ||
+        moveRes.san === retryState.targetSan;
+
+      if (isCorrect) {
+        setRetryState((prev) => ({
+          ...prev,
+          isSolved: true,
+          lastAttemptWrong: false,
+          solvedFen: game.fen(),
+        }));
+        return true;
+      } else {
+        setRetryState((prev) => ({
+          ...prev,
+          attempts: (prev.attempts || 0) + 1,
+          lastAttemptWrong: true,
+        }));
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  };
+
+  const handleGraphClick = (e) => {
+    if (moves.length === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, clickX / rect.width));
+    const targetIndex = Math.round(pct * moves.length);
+    setPreviewState(null);
+    setRetryState(null);
+    setCurrentMoveIndex(targetIndex);
+  };
+
   // Helper to format an arrow object with startSquare, endSquare, color and numeric indices
   const formatArrow = (from, to, color) => ({
     startSquare: from,
@@ -998,6 +1466,14 @@ export default function ChessAnalyzer({
   // - Best Move: Emerald Green (#10b981)
   // - Alternative Move: Cyan (#06b6d4)
   const boardArrows = useMemo(() => {
+    // In retry mode: show no spoil arrows while attempting, show emerald arrow once solved
+    if (retryState) {
+      if (retryState.isSolved && retryState.from && retryState.to) {
+        return [formatArrow(retryState.from, retryState.to, '#10b981')];
+      }
+      return [];
+    }
+
     if (!showGuideLines) return [];
 
     // If currently previewing a move, draw arrow for that move in its dedicated static color
@@ -1043,6 +1519,7 @@ export default function ChessAnalyzer({
 
     return Array.from(uniqueArrowsMap.values());
   }, [
+    retryState,
     showGuideLines,
     showPlayedMoveArrow,
     showBestMoveArrow,
@@ -1060,6 +1537,24 @@ export default function ChessAnalyzer({
   // - Best Move Preview: Emerald Green (rgba(16, 185, 129, 0.25) origin, rgba(16, 185, 129, 0.35) + #10b981 border destination)
   // - Alternative Move Preview: Cyan (rgba(6, 182, 212, 0.25) origin, rgba(6, 182, 212, 0.35) + #06b6d4 border destination)
   const boardSquareStyles = useMemo(() => {
+    // 0. Retry mode active highlights
+    if (retryState) {
+      const styles = {};
+      if (retryState.isHintShown && retryState.from) {
+        styles[retryState.from] = {
+          backgroundColor: 'rgba(245, 158, 11, 0.35)',
+          boxShadow: 'inset 0 0 0 3px #f59e0b',
+        };
+      }
+      if (retryState.isSolved && retryState.to) {
+        styles[retryState.to] = {
+          backgroundColor: 'rgba(16, 185, 129, 0.35)',
+          boxShadow: 'inset 0 0 0 3px #10b981',
+        };
+      }
+      return styles;
+    }
+
     const styles = {};
 
     // 1. Highlight preview move squares if currently previewing
@@ -1093,6 +1588,7 @@ export default function ChessAnalyzer({
 
     return styles;
   }, [
+    retryState,
     currentMoveIndex,
     moves,
     previewState,
@@ -1190,11 +1686,11 @@ export default function ChessAnalyzer({
         if (curr.type === 'mate' && prev.type !== 'mate') {
           const isWhiteMating = curr.value > 0;
           const playerMated   = move.isWhite ? isWhiteMating : !isWhiteMating;
-          localClassifications[i] = classifyMove(playerMated ? 0 : 500, true, playerMated, curr.bestMove, move.san);
+          localClassifications[i] = classifyMove(playerMated ? 0 : 500, true, playerMated, curr.bestMove, move.san, prev, curr, i, move.isWhite);
         } else {
           const evalDiff = curr.value - prev.value;
           const evalLoss = move.isWhite ? -evalDiff : evalDiff;
-          localClassifications[i] = classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, curr.bestMove, move.san);
+          localClassifications[i] = classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, curr.bestMove, move.san, prev, curr, i, move.isWhite);
         }
       }
 
@@ -1210,28 +1706,28 @@ export default function ChessAnalyzer({
     }
   };
 
-    const cancelFullGameAnalysis = () => {
+  const handleAutoAnalyze = runFullGameAnalysis;
+
+  const cancelFullGameAnalysis = () => {
     cancelAnalysisRef.current = true;
     stop();
     requestedFenRef.current = null; // Invalidate live tracking
     setIsAnalyzingAll(false);
   };
 
+  // Navigation handlers — clear any active preview and retry states synchronously
+  const goToStart = () => { setPreviewState(null); setRetryState(null); setCurrentMoveIndex(0); };
+  const goToPrev = () => { setPreviewState(null); setRetryState(null); setCurrentMoveIndex((prev) => Math.max(0, prev - 1)); };
+  const goToNext = () => { setPreviewState(null); setRetryState(null); setCurrentMoveIndex((prev) => Math.min(moves.length, prev + 1)); };
+  const goToEnd = () => { setPreviewState(null); setRetryState(null); setCurrentMoveIndex(moves.length); };
 
-  // Navigation handlers — also clear any active preview synchronously
-  // so mobile doesn't show a stale board position between the tap and the useEffect cleanup
-  const goToStart = () => { setPreviewState(null); setCurrentMoveIndex(0); };
-  const goToPrev = () => { setPreviewState(null); setCurrentMoveIndex((prev) => Math.max(0, prev - 1)); };
-  const goToNext = () => { setPreviewState(null); setCurrentMoveIndex((prev) => Math.min(moves.length, prev + 1)); };
-  const goToEnd = () => { setPreviewState(null); setCurrentMoveIndex(moves.length); };
-
-
-  // Jump to Next / Prev Blunder
+  // Jump to Next / Prev Blunder or Mistake or Missed Win
   const goToNextBlunder = () => {
     for (let i = currentMoveIndex + 1; i <= moves.length; i++) {
       const cls = moveClassifications[i];
-      if (cls && (cls.type === 'blunder' || cls.type === 'mistake')) {
+      if (cls && (cls.type === 'blunder' || cls.type === 'mistake' || cls.type === 'missedWin')) {
         setPreviewState(null);
+        setRetryState(null);
         setCurrentMoveIndex(i);
         return;
       }
@@ -1241,8 +1737,9 @@ export default function ChessAnalyzer({
   const goToPrevBlunder = () => {
     for (let i = currentMoveIndex - 1; i >= 1; i--) {
       const cls = moveClassifications[i];
-      if (cls && (cls.type === 'blunder' || cls.type === 'mistake')) {
+      if (cls && (cls.type === 'blunder' || cls.type === 'mistake' || cls.type === 'missedWin')) {
         setPreviewState(null);
+        setRetryState(null);
         setCurrentMoveIndex(i);
         return;
       }
@@ -1512,9 +2009,12 @@ export default function ChessAnalyzer({
             <div className="flex-1 aspect-square rounded-lg overflow-hidden shadow-md border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900">
               <Chessboard
                 options={{
-                  position: previewState ? previewState.fen : currentFen,
+                  position: retryState
+                    ? (retryState.isSolved ? retryState.solvedFen : retryState.prevFen)
+                    : (previewState ? previewState.fen : currentFen),
                   boardOrientation: boardOrientation,
-                  allowDragging: false,
+                  allowDragging: Boolean(retryState && !retryState.isSolved),
+                  onPieceDrop: handleRetryPieceDrop,
                   showAnimations: true,
                   animationDurationInMs: 250,
                   boardStyle: {
@@ -1585,6 +2085,111 @@ export default function ChessAnalyzer({
             >
               Next Blunder ⏩
             </button>
+          </div>
+
+          {/* Rule 3: The Game Graph (Visual narrative of advantage) */}
+          <div className="w-full max-w-[500px] mt-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 shadow-xs transition-colors select-none">
+            <div className="flex items-center justify-between text-xs mb-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-zinc-700 dark:text-zinc-300">
+                <span className="text-sm">📈</span>
+                <span className="text-[11px] uppercase tracking-wider">Advantage Narrative</span>
+              </div>
+              <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                Click graph to jump to move
+              </span>
+            </div>
+
+            <div
+              className="relative w-full h-[76px] bg-zinc-50 dark:bg-zinc-950/70 rounded-lg overflow-hidden border border-zinc-200/80 dark:border-zinc-800 cursor-pointer"
+              onClick={handleGraphClick}
+              title="Click on the advantage graph to jump to that move"
+            >
+              {moves.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-xs text-zinc-400">
+                  Load a game to see the advantage graph
+                </div>
+              ) : (
+                <svg viewBox="0 0 500 74" className="w-full h-full block">
+                  <defs>
+                    <linearGradient id="whiteAdvGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.4" />
+                      <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.02" />
+                    </linearGradient>
+                    <linearGradient id="blackAdvGrad" x1="0" y1="1" x2="0" y2="0">
+                      <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
+                      <stop offset="100%" stopColor="#ef4444" stopOpacity="0.02" />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Midline (0.00 Equal) */}
+                  <line x1="0" y1="37" x2="500" y2="37" stroke="#94a3b8" strokeDasharray="3 3" strokeOpacity="0.4" strokeWidth="1" />
+
+                  {/* Static Score Guides */}
+                  <text x="6" y="13" fontSize="8" fill="#94a3b8" fontWeight="bold">+5</text>
+                  <text x="6" y="40" fontSize="8" fill="#94a3b8">0.0</text>
+                  <text x="6" y="68" fontSize="8" fill="#94a3b8" fontWeight="bold">-5</text>
+
+                  {/* Shaded Area Paths */}
+                  {gameGraphData.whiteArea && (
+                    <path d={gameGraphData.whiteArea} fill="url(#whiteAdvGrad)" />
+                  )}
+                  {gameGraphData.blackArea && (
+                    <path d={gameGraphData.blackArea} fill="url(#blackAdvGrad)" />
+                  )}
+
+                  {/* Main Advantage Line */}
+                  {gameGraphData.linePath && (
+                    <path
+                      d={gameGraphData.linePath}
+                      fill="none"
+                      stroke="#2563eb"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  )}
+
+                  {/* Blunder & Mistake Highlight Dots */}
+                  {gameGraphData.blunderDots.map((dot, idx) => (
+                    <circle
+                      key={idx}
+                      cx={dot.x}
+                      cy={dot.y}
+                      r={dot.isBlunder ? "4.5" : "3.5"}
+                      fill={dot.isBlunder ? "#ef4444" : "#f97316"}
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                      className="transition-transform hover:scale-125"
+                    >
+                      <title>{dot.title}</title>
+                    </circle>
+                  ))}
+
+                  {/* Active Move Scrubber */}
+                  {gameGraphData.currentPoint && (
+                    <>
+                      <line
+                        x1={gameGraphData.currentPoint.x}
+                        y1="4"
+                        x2={gameGraphData.currentPoint.x}
+                        y2="70"
+                        stroke="#3b82f6"
+                        strokeWidth="2"
+                        strokeDasharray="2 2"
+                      />
+                      <circle
+                        cx={gameGraphData.currentPoint.x}
+                        cy={gameGraphData.currentPoint.y}
+                        r="5"
+                        fill="#2563eb"
+                        stroke="#ffffff"
+                        strokeWidth="2"
+                      />
+                    </>
+                  )}
+                </svg>
+              )}
+            </div>
           </div>
           {/* Guide Lines & Visual Suggestions Toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-2 mt-3 w-full max-w-[500px] p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-xs transition-colors">
@@ -1824,399 +2429,714 @@ export default function ChessAnalyzer({
           </div>
         </div>
 
-        {/* Right Column: Engine Dashboard, Move List, PGN & Chess.com Import (5 cols) */}
-        <div className="lg:col-span-5 flex flex-col gap-5">
-          {/* Engine Dashboard & Auto-Analyze Action */}
-          <div className="bg-zinc-50 dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm transition-colors">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                Stockfish Engine
-              </h2>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-zinc-500 dark:text-zinc-400">Depth:</label>
-                <select
-                  value={evalDepth}
-                  onChange={(e) => setEvalDepth(Number(e.target.value))}
-                  disabled={isAnalyzingAll}
-                  className="text-xs border border-zinc-300 dark:border-zinc-700 rounded px-1.5 py-0.5 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200"
-                >
-                  <option value={10}>10</option>
-                  <option value={12}>12</option>
-                  <option value={15}>15</option>
-                  <option value={18}>18</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex items-baseline justify-between mb-3">
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-extrabold font-mono text-zinc-900 dark:text-zinc-50">
-                  {activeEval?.scoreText || '0.00'}
+        {/* Right Column: Game Review vs Deep Analysis Dual Experience (5 cols) */}
+        <div className="lg:col-span-5 flex flex-col gap-4">
+          {/* Rule 5: Dual Mode Switcher */}
+          <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800/90 rounded-xl border border-zinc-200 dark:border-zinc-700/80 shadow-xs">
+            <button
+              onClick={() => { setAnalysisTab('review'); setRetryState(null); }}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 select-none cursor-pointer ${
+                analysisTab === 'review'
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50 shadow-xs ring-1 ring-zinc-200 dark:ring-zinc-700'
+                  : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+              }`}
+            >
+              <span className="text-sm">⭐</span>
+              <span>Game Review</span>
+              {accuracyScores.hasData && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-mono font-bold">
+                  {accuracyScores.white}% / {accuracyScores.black}%
                 </span>
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {activeEval?.type === 'mate' ? 'checkmate line' : 'pawns advantage'}
-                </span>
-              </div>
-              <div className="text-right text-xs text-zinc-500 dark:text-zinc-400">
-                Depth {activeEval?.depth || 0}
-              </div>
-            </div>
-
-            {/* Auto-Analyze Full Game Trigger */}
-            <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
-              {!isAnalyzingAll ? (
-                <button
-                  onClick={runFullGameAnalysis}
-                  disabled={!isReady || moves.length === 0}
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <span>⚡</span> Auto-Analyze Full Game
-                </button>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                    <span>
-                      Analyzing move {analysisProgress.current} of {analysisProgress.total}...
-                    </span>
-                    <button
-                      onClick={cancelFullGameAnalysis}
-                      className="text-xs text-red-600 dark:text-red-400 hover:underline font-semibold"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-emerald-600 h-full transition-all duration-200"
-                      style={{
-                        width: `${(analysisProgress.current / (analysisProgress.total || 1)) * 100}%`,
-                      }}
-                    />
-                  </div>
-                </div>
               )}
-            </div>
+            </button>
+            <button
+              onClick={() => { setAnalysisTab('deep'); setRetryState(null); }}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 select-none cursor-pointer ${
+                analysisTab === 'deep'
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50 shadow-xs ring-1 ring-zinc-200 dark:ring-zinc-700'
+                  : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+              }`}
+            >
+              <span className="text-sm">🔬</span>
+              <span>Deep Analysis</span>
+              <span className="text-[10px] text-zinc-400 font-mono">Depth {evalDepth}</span>
+            </button>
           </div>
 
-          {/* Accuracy & Game Breakdown Summary (when evaluated) */}
-          {(gameStats.white.best > 0 || gameStats.black.best > 0) && (
-            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5 shadow-sm text-xs transition-colors">
-              <h4 className="font-bold text-zinc-800 dark:text-zinc-200 mb-2 uppercase tracking-wider text-[11px]">
-                Game Accuracy Summary
-              </h4>
-              <div className="grid grid-cols-2 gap-3 divide-x divide-zinc-100 dark:divide-zinc-800">
-                <div>
-                  <p className="font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">{gameHeaders.White || 'White'}</p>
-                  <ul className="space-y-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
-                    <li>🌟 Best: <strong>{gameStats.white.best}</strong></li>
-                    <li>👍 Good: <strong>{gameStats.white.good}</strong></li>
-                    <li>⚠️ Inaccuracy: <strong className="text-amber-600 dark:text-amber-400">{gameStats.white.inaccuracy}</strong></li>
-                    <li>❌ Mistakes: <strong className="text-orange-600 dark:text-orange-400">{gameStats.white.mistake}</strong></li>
-                    <li>🚨 Blunders: <strong className="text-red-600 dark:text-red-400">{gameStats.white.blunder}</strong></li>
-                  </ul>
+          {/* TAB 1: BEGINNER-FRIENDLY GAME REVIEW (Rules 1, 2, 3, 4, 5) */}
+          {analysisTab === 'review' && (
+            <div className="flex flex-col gap-4">
+              {/* Rule 1: CAPS Game Accuracy Score Card */}
+              {accuracyScores.hasData ? (
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-xs transition-colors flex flex-col gap-3">
+                  <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm">🎯</span>
+                      <span className="text-xs font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
+                        Accuracy (CAPS Model)
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-zinc-400 font-mono">0–100% Score</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* White Accuracy */}
+                    <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800">
+                      <div className="flex items-center justify-between text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                        <span className="truncate">⚪ {gameHeaders.White || 'White'}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full border ${getAccuracyTier(accuracyScores.white).badgeClass}`}>
+                          {getAccuracyTier(accuracyScores.white).label}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className="text-2xl font-black font-mono text-zinc-900 dark:text-zinc-50">
+                          {accuracyScores.white !== null ? `${accuracyScores.white}%` : '--'}
+                        </span>
+                      </div>
+                      <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                          style={{ width: `${accuracyScores.white || 0}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Black Accuracy */}
+                    <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800">
+                      <div className="flex items-center justify-between text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                        <span className="truncate">⚫ {gameHeaders.Black || 'Black'}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full border ${getAccuracyTier(accuracyScores.black).badgeClass}`}>
+                          {getAccuracyTier(accuracyScores.black).label}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className="text-2xl font-black font-mono text-zinc-900 dark:text-zinc-50">
+                          {accuracyScores.black !== null ? `${accuracyScores.black}%` : '--'}
+                        </span>
+                      </div>
+                      <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-teal-500 h-full rounded-full transition-all duration-500"
+                          style={{ width: `${accuracyScores.black || 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Move breakdown pills */}
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-600 dark:text-zinc-400">
+                    <div className="flex flex-wrap gap-1">
+                      {gameStats.white.best > 0 && <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300">🌟 {gameStats.white.best}</span>}
+                      {gameStats.white.good > 0 && <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300">👍 {gameStats.white.good}</span>}
+                      {gameStats.white.inaccuracy > 0 && <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300">⚠️ {gameStats.white.inaccuracy}</span>}
+                      {gameStats.white.mistake > 0 && <span className="px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300">❌ {gameStats.white.mistake}</span>}
+                      {gameStats.white.blunder > 0 && <span className="px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300">🚨 {gameStats.white.blunder}</span>}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {gameStats.black.best > 0 && <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300">🌟 {gameStats.black.best}</span>}
+                      {gameStats.black.good > 0 && <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300">👍 {gameStats.black.good}</span>}
+                      {gameStats.black.inaccuracy > 0 && <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300">⚠️ {gameStats.black.inaccuracy}</span>}
+                      {gameStats.black.mistake > 0 && <span className="px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300">❌ {gameStats.black.mistake}</span>}
+                      {gameStats.black.blunder > 0 && <span className="px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300">🚨 {gameStats.black.blunder}</span>}
+                    </div>
+                  </div>
                 </div>
-                <div className="pl-3">
-                  <p className="font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">{gameHeaders.Black || 'Black'}</p>
-                  <ul className="space-y-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
-                    <li>🌟 Best: <strong>{gameStats.black.best}</strong></li>
-                    <li>👍 Good: <strong>{gameStats.black.good}</strong></li>
-                    <li>⚠️ Inaccuracy: <strong className="text-amber-600 dark:text-amber-400">{gameStats.black.inaccuracy}</strong></li>
-                    <li>❌ Mistakes: <strong className="text-orange-600 dark:text-orange-400">{gameStats.black.mistake}</strong></li>
-                    <li>🚨 Blunders: <strong className="text-red-600 dark:text-red-400">{gameStats.black.blunder}</strong></li>
-                  </ul>
+              ) : (
+                <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/20 border border-emerald-200 dark:border-emerald-800/60 rounded-xl p-4 shadow-xs flex flex-col gap-2.5">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                    <span>⚡</span>
+                    <span>Game Review & Accuracy</span>
+                  </div>
+                  <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90 leading-relaxed">
+                    Auto-Analyze this match to calculate your 0–100% CAPS Accuracy score and unlock full narrative coaching and blunder retry puzzles.
+                  </p>
+                  <button
+                    onClick={runFullGameAnalysis}
+                    disabled={!isReady || moves.length === 0 || isAnalyzingAll}
+                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>⚡</span>
+                    <span>{isAnalyzingAll ? `Analyzing Move ${analysisProgress.current} of ${analysisProgress.total}...` : 'Auto-Analyze Game Now'}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Rule 3: The Virtual Coach Speech Bubble Card */}
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-xs transition-colors flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-lg shadow-2xs select-none">
+                      {currentVirtualCoach.avatar}
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                        <span>Virtual Coach</span>
+                        <span className="text-[10px] font-normal text-zinc-400">• {currentVirtualCoach.mood}</span>
+                      </h3>
+                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        {currentVirtualCoach.title}
+                      </span>
+                    </div>
+                  </div>
+                  {currentMoveIndex > 0 && (
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${currentClassification.badgeClass}`}>
+                      <span>{currentClassification.icon}</span>
+                      <span>{currentClassification.label}</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Speech Bubble */}
+                <div className="relative p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/80 dark:border-zinc-700/60 text-xs text-zinc-700 dark:text-zinc-200 leading-relaxed">
+                  <p>{currentVirtualCoach.speech}</p>
+                </div>
+
+                {/* Game outcome conclusion in review */}
+                {currentMoveIndex === moves.length && gameTermination && (
+                  <div className={`p-2.5 rounded-lg border flex items-center gap-2 text-xs ${gameTermination.badgeClass}`}>
+                    <span className="text-lg">{gameTermination.icon}</span>
+                    <span className="font-semibold">{gameTermination.description}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Rule 4: Active Remediation ("Retry Mistakes") Card */}
+              {previousAlternative && ['blunder', 'mistake', 'inaccuracy', 'missedWin'].includes(currentClassification?.type) && (
+                <div>
+                  {!retryState ? (
+                    <div className="p-3.5 rounded-xl border border-amber-300 dark:border-amber-800/70 bg-gradient-to-br from-amber-50 to-orange-50/50 dark:from-amber-950/30 dark:to-orange-950/20 shadow-xs flex flex-col gap-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-200 text-xs">
+                          <span>🎯</span>
+                          <span>Retry Mistake</span>
+                        </div>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-200/60 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                          Active Learning
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-amber-900/90 dark:text-amber-300 leading-relaxed">
+                        You played <strong className="font-mono">{moves[currentMoveIndex - 1]?.san}</strong> ({currentClassification.label}). Can you find the better move on the board?
+                      </p>
+
+                      <button
+                        onClick={handleStartRetry}
+                        className="w-full py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <span>🎯</span>
+                        <span>Start Retry Move</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-xl border-2 border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/40 shadow-md flex flex-col gap-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-bold text-emerald-900 dark:text-emerald-200 text-xs">
+                          <span className="text-sm">🎯</span>
+                          <span>Retry Mistake Active</span>
+                        </div>
+                        <button
+                          onClick={handleExitRetry}
+                          className="text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer"
+                        >
+                          ✕ Exit
+                        </button>
+                      </div>
+
+                      {!retryState.isSolved ? (
+                        <div className="flex flex-col gap-2.5">
+                          <p className="text-xs text-emerald-900/90 dark:text-emerald-300">
+                            Drag pieces on the board to play the winning move!
+                          </p>
+
+                          {retryState.lastAttemptWrong && (
+                            <div className="p-2 rounded-lg bg-red-100 dark:bg-red-950/60 border border-red-300 dark:border-red-800 text-red-800 dark:text-red-300 text-xs flex items-center gap-1.5 font-medium">
+                              <span>❌</span>
+                              <span>That move is not optimal. Give it another try!</span>
+                            </div>
+                          )}
+
+                          {retryState.isHintShown && (
+                            <div className="p-2.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-2">
+                              <span>💡</span>
+                              <span>Coach Hint: Look at your <strong>{retryState.pieceName}</strong> on <strong>{retryState.from}</strong>!</span>
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={handleShowRetryHint}
+                              disabled={retryState.isHintShown}
+                              className="flex-1 py-1.5 px-2 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-50 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <span>💡</span>
+                              <span>{retryState.isHintShown ? 'Hint Shown' : 'Show Hint'}</span>
+                            </button>
+                            <button
+                              onClick={handleRevealRetrySolution}
+                              className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <span>👁️</span>
+                              <span>Reveal Solution</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-2.5">
+                          <div className="p-2.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/50 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200 text-xs font-bold flex items-center gap-2">
+                            <span className="text-lg">🎉</span>
+                            <span>Brilliant! You found {retryState.targetSan}!</span>
+                          </div>
+
+                          <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90">
+                            Playing <strong className="font-mono">{retryState.targetSan}</strong> is the top Stockfish continuation that maintains your advantage.
+                          </p>
+
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={() => { setRetryState(null); goToNextBlunder(); }}
+                              className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <span>Next Blunder ⏩</span>
+                            </button>
+                            <button
+                              onClick={handleExitRetry}
+                              className="px-3 py-2 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                            >
+                              Back to Review
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Simplified Best Move Preview Card (Rule 5: Progressive Disclosure) */}
+              {currentBestMove && (
+                <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xs flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    <span className="text-xs text-zinc-600 dark:text-zinc-400">Best Move:</span>
+                    <strong className="font-mono font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
+                      {currentBestMove.san}
+                    </strong>
+                  </div>
+                  <button
+                    onClick={handlePreviewBestMove}
+                    disabled={previewState?.moveSan === currentBestMove.san}
+                    className="px-3 py-1 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0 cursor-pointer"
+                  >
+                    {previewState?.moveSan === currentBestMove.san ? 'Previewing' : '👀 Preview'}
+                  </button>
+                </div>
+              )}
+
+              {/* Friendly Move List with Emotion Icons (Rule 2) */}
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden shadow-xs flex flex-col transition-colors">
+                <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    Game Moves ({moves.length})
+                  </h3>
+                  <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Tap move to inspect</span>
+                </div>
+
+                <div className="max-h-[220px] overflow-y-auto p-2 font-mono text-xs">
+                  {moves.length === 0 ? (
+                    <div className="p-4 text-center text-zinc-400">No moves loaded</div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-1">
+                      {moves.map((move, idx) => {
+                        const isSelected = currentMoveIndex === idx + 1;
+                        const classification = moveClassifications[idx + 1];
+
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => { setPreviewState(null); setRetryState(null); setCurrentMoveIndex(idx + 1); }}
+                            className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition-colors cursor-pointer ${
+                              isSelected
+                                ? 'bg-blue-600 text-white font-bold'
+                                : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200'
+                            }`}
+                          >
+                            <span className="flex items-center gap-1 truncate">
+                              {move.isWhite && <span className="opacity-60">{move.moveNumber}.</span>}
+                              <span>{move.san}</span>
+                              {classification && classification.symbol && (
+                                <span className={`text-[10px] font-bold ${isSelected ? 'text-white' : classification.color}`}>
+                                  {classification.symbol}
+                                </span>
+                              )}
+                            </span>
+                            {classification && classification.icon && (
+                              <span className="text-xs shrink-0 select-none">{classification.icon}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Move History / Notation Table */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden shadow-sm flex flex-col transition-colors">
-            <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                Move List ({moves.length} moves)
-              </h3>
-              <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Click move to jump</span>
-            </div>
-
-            <div className="max-h-[200px] overflow-y-auto p-2 font-mono text-xs divide-y divide-zinc-100 dark:divide-zinc-800/40">
-              {moves.length === 0 ? (
-                <div className="p-4 text-center text-zinc-400 dark:text-zinc-500">No moves loaded</div>
-              ) : (
-                <div className="flex flex-col gap-1.5">
-                  <div className="grid grid-cols-2 gap-1">
-                    {moves.map((move, idx) => {
-                      const isSelected = currentMoveIndex === idx + 1;
-                      const cachedScore = evalCache[idx + 1]?.scoreText;
-                      const classification = moveClassifications[idx + 1];
-
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => { setPreviewState(null); setCurrentMoveIndex(idx + 1); }}
-                          className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
-                            isSelected
-                              ? 'bg-blue-600 text-white font-bold'
-                              : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200'
-                          }`}
-                        >
-                          <span className="flex items-center gap-1">
-                            {move.isWhite && <span className="opacity-60">{move.moveNumber}.</span>}
-                            <span>{move.san}</span>
-                            {classification && classification.symbol && (
-                              <span
-                                className={`text-[10px] font-bold ${
-                                  isSelected ? 'text-white' : classification.color
-                                }`}
-                              >
-                                {classification.symbol}
-                              </span>
-                            )}
-                          </span>
-                          {cachedScore && (
-                            <span
-                              className={`text-[10px] ${
-                                isSelected ? 'text-blue-100' : 'text-zinc-400 dark:text-zinc-500'
-                              }`}
-                            >
-                              {cachedScore}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Game Outcome Conclusion Pill at bottom of Move List */}
-                  {(gameTermination || gameHeaders.Result) && (
-                    <button
-                      onClick={() => { setPreviewState(null); setCurrentMoveIndex(moves.length); }}
-                      className={`mt-1 w-full py-1.5 px-2.5 rounded-lg border text-xs font-semibold flex items-center justify-between transition-colors ${
-                        currentMoveIndex === moves.length
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300'
-                          : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-zinc-700 dark:text-zinc-300'
-                      }`}
+          {/* TAB 2: ADVANCED DEEP ANALYSIS (Rule 5: Progressive Disclosure) */}
+          {analysisTab === 'deep' && (
+            <div className="flex flex-col gap-4">
+              {/* Engine Dashboard & Auto-Analyze Action */}
+              <div className="bg-zinc-50 dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm transition-colors">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    Stockfish Engine
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-zinc-500 dark:text-zinc-400">Depth:</label>
+                    <select
+                      value={evalDepth}
+                      onChange={(e) => setEvalDepth(Number(e.target.value))}
+                      disabled={isAnalyzingAll}
+                      className="text-xs border border-zinc-300 dark:border-zinc-700 rounded px-1.5 py-0.5 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200"
                     >
-                      <span className="flex items-center gap-1.5 truncate">
-                        <span>{gameTermination?.icon || '🏁'}</span>
-                        <span className="truncate">{gameTermination?.badge || `Result: ${gameHeaders.Result}`}</span>
-                      </span>
-                      <span className="font-mono text-[11px] opacity-75 shrink-0 ml-2">
-                        {gameHeaders.Result || ''}
-                      </span>
+                      <option value={10}>10</option>
+                      <option value={12}>12</option>
+                      <option value={15}>15</option>
+                      <option value={18}>18</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-baseline justify-between mb-3">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold font-mono text-zinc-900 dark:text-zinc-50">
+                      {activeEval?.scoreText || '0.00'}
+                    </span>
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {activeEval?.type === 'mate' ? 'checkmate line' : 'pawns advantage'}
+                    </span>
+                  </div>
+                  <div className="text-right text-xs text-zinc-500 dark:text-zinc-400">
+                    Depth {activeEval?.depth || 0}
+                  </div>
+                </div>
+
+                {/* Auto-Analyze Full Game Trigger */}
+                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
+                  {!isAnalyzingAll ? (
+                    <button
+                      onClick={runFullGameAnalysis}
+                      disabled={!isReady || moves.length === 0}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>⚡</span> Auto-Analyze Full Game
                     </button>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                        <span>
+                          Analyzing move {analysisProgress.current} of {analysisProgress.total}...
+                        </span>
+                        <button
+                          onClick={cancelFullGameAnalysis}
+                          className="text-xs text-red-600 dark:text-red-400 hover:underline font-semibold cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-emerald-600 h-full transition-all duration-200"
+                          style={{
+                            width: `${(analysisProgress.current / (analysisProgress.total || 1)) * 100}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* Import Modes: Tabs for Link vs PGN vs Chess.com Profile */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm flex flex-col gap-3 transition-colors">
-            {/* Tabs Switcher */}
-            <div className="flex border-b border-zinc-200 dark:border-zinc-800 pb-2 gap-2">
-              <button
-                onClick={() => setActiveTab('link')}
-                className={`pb-1 text-xs font-bold border-b-2 transition-colors ${
-                  activeTab === 'link'
-                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
-                }`}
-              >
-                🔗 Link
-              </button>
-              <button
-                onClick={() => setActiveTab('pgn')}
-                className={`pb-1 text-xs font-bold border-b-2 transition-colors ${
-                  activeTab === 'pgn'
-                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
-                }`}
-              >
-                📝 Raw PGN
-              </button>
-              <button
-                onClick={() => setActiveTab('chesscom')}
-                className={`pb-1 text-xs font-bold border-b-2 transition-colors flex items-center gap-1 ${
-                  activeTab === 'chesscom'
-                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
-                }`}
-              >
-                <span>♟️ Profile</span>
-                {chesscomGames.length > 0 && (
-                  <span className="px-1.5 py-0.2 bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-full text-[10px]">
-                    {chesscomGames.length}
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {/* TAB 0: Direct Game Link */}
-            {activeTab === 'link' && (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                    Chess.com Game Link / Share Text
-                  </label>
+              {/* Move History / Notation Table with Raw Scores */}
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden shadow-sm flex flex-col transition-colors">
+                <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    Move Table & Engine Scores
+                  </h3>
+                  <span className="text-[11px] text-zinc-400 dark:text-zinc-500">Depth {evalDepth}</span>
                 </div>
 
-                <input
-                  type="text"
-                  value={analyzerLinkInput}
-                  onChange={(e) => {
-                    setAnalyzerLinkInput(e.target.value);
-                    setAnalyzerLinkError('');
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleFetchAnalyzerLink()}
-                  placeholder="Paste URL (e.g. https://www.chess.com/game/live/185520318828)"
-                  className="w-full text-xs font-mono p-2.5 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950"
-                />
+                <div className="max-h-[200px] overflow-y-auto p-2 font-mono text-xs divide-y divide-zinc-100 dark:divide-zinc-800/40">
+                  {moves.length === 0 ? (
+                    <div className="p-4 text-center text-zinc-400 dark:text-zinc-500">No moves loaded</div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="grid grid-cols-2 gap-1">
+                        {moves.map((move, idx) => {
+                          const isSelected = currentMoveIndex === idx + 1;
+                          const cachedScore = evalCache[idx + 1]?.scoreText;
+                          const classification = moveClassifications[idx + 1];
 
-                {analyzerLinkError && (
-                  <p className="text-xs text-red-600 dark:text-red-400 font-medium">{analyzerLinkError}</p>
-                )}
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => { setPreviewState(null); setRetryState(null); setCurrentMoveIndex(idx + 1); }}
+                              className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition-colors cursor-pointer ${
+                                isSelected
+                                  ? 'bg-blue-600 text-white font-bold'
+                                  : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200'
+                              }`}
+                            >
+                              <span className="flex items-center gap-1 truncate">
+                                {move.isWhite && <span className="opacity-60">{move.moveNumber}.</span>}
+                                <span>{move.san}</span>
+                                {classification && classification.symbol && (
+                                  <span className={`text-[10px] font-bold ${isSelected ? 'text-white' : classification.color}`}>
+                                    {classification.symbol}
+                                  </span>
+                                )}
+                              </span>
+                              {cachedScore && (
+                                <span className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-zinc-400 dark:text-zinc-500'}`}>
+                                  {cachedScore}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
 
-                <button
-                  onClick={() => handleFetchAnalyzerLink()}
-                  disabled={analyzerLinkLoading}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5"
-                >
-                  {analyzerLinkLoading ? 'Loading Game...' : 'Analyze Game →'}
-                </button>
+                      {/* Game Outcome Conclusion Pill */}
+                      {(gameTermination || gameHeaders.Result) && (
+                        <button
+                          onClick={() => { setPreviewState(null); setRetryState(null); setCurrentMoveIndex(moves.length); }}
+                          className={`mt-1 w-full py-1.5 px-2.5 rounded-lg border text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                            currentMoveIndex === moves.length
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300'
+                              : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-zinc-700 dark:text-zinc-300'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5 truncate">
+                            <span>{gameTermination?.icon || '🏁'}</span>
+                            <span className="truncate">{gameTermination?.badge || `Result: ${gameHeaders.Result}`}</span>
+                          </span>
+                          <span className="font-mono text-[11px] opacity-75 shrink-0 ml-2">
+                            {gameHeaders.Result || ''}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
 
-            {/* TAB 1: PGN Text Input */}
-            {activeTab === 'pgn' && (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                    Paste PGN
-                  </label>
+              {/* Import Modes: Tabs for Link vs PGN vs Chess.com Profile */}
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm flex flex-col gap-3 transition-colors">
+                {/* Tabs Switcher */}
+                <div className="flex border-b border-zinc-200 dark:border-zinc-800 pb-2 gap-2">
                   <button
-                    onClick={() => {
-                      setPgnText(SAMPLE_PGN);
-                      loadPgnString(SAMPLE_PGN);
-                    }}
-                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                    onClick={() => setActiveTab('link')}
+                    className={`pb-1 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
+                      activeTab === 'link'
+                        ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                        : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                    }`}
                   >
-                    Load Morphy Opera Game
+                    🔗 Link
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('pgn')}
+                    className={`pb-1 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
+                      activeTab === 'pgn'
+                        ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                        : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                    }`}
+                  >
+                    📝 Raw PGN
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('chesscom')}
+                    className={`pb-1 text-xs font-bold border-b-2 transition-colors flex items-center gap-1 cursor-pointer ${
+                      activeTab === 'chesscom'
+                        ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                        : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                    }`}
+                  >
+                    <span>♟️ Profile</span>
+                    {chesscomGames.length > 0 && (
+                      <span className="px-1.5 py-0.2 bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-full text-[10px]">
+                        {chesscomGames.length}
+                      </span>
+                    )}
                   </button>
                 </div>
 
-                <textarea
-                  rows={3}
-                  value={pgnText}
-                  onChange={(e) => setPgnText(e.target.value)}
-                  placeholder="Paste PGN here..."
-                  className="w-full text-xs font-mono p-2 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950"
-                />
+                {/* TAB 0: Direct Game Link */}
+                {activeTab === 'link' && (
+                  <div className="flex flex-col gap-3">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                      Chess.com Game Link / Share Text
+                    </label>
 
-                {errorMsg && (
-                  <p className="text-xs text-red-600 dark:text-red-400 font-medium">{errorMsg}</p>
-                )}
-
-                <button
-                  onClick={() => loadPgnString(pgnText)}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
-                >
-                  Load PGN
-                </button>
-              </div>
-            )}
-
-            {/* TAB 2: Chess.com Profile Import */}
-            {activeTab === 'chesscom' && (
-              <div className="flex flex-col gap-3">
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1 block">
-                    Chess.com Username
-                  </label>
-                  <div className="flex gap-2">
                     <input
                       type="text"
-                      value={chesscomUsername}
-                      onChange={(e) => setChesscomUsername(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && fetchChesscomGames(false)}
-                      placeholder="e.g. hikaru, magnuscarlsen"
-                      className="flex-1 text-xs px-2.5 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950"
+                      value={analyzerLinkInput}
+                      onChange={(e) => {
+                        setAnalyzerLinkInput(e.target.value);
+                        setAnalyzerLinkError('');
+                      }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleFetchAnalyzerLink()}
+                      placeholder="Paste URL (e.g. https://www.chess.com/game/live/185520318828)"
+                      className="w-full text-xs font-mono p-2.5 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950"
                     />
+
+                    {analyzerLinkError && (
+                      <p className="text-xs text-red-600 dark:text-red-400 font-medium">{analyzerLinkError}</p>
+                    )}
+
                     <button
-                      onClick={() => fetchChesscomGames(false)}
-                      disabled={chesscomLoading}
-                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
+                      onClick={() => handleFetchAnalyzerLink()}
+                      disabled={analyzerLinkLoading}
+                      className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      {chesscomLoading ? 'Loading...' : 'Fetch'}
+                      {analyzerLinkLoading ? 'Loading Game...' : 'Analyze Game →'}
                     </button>
                   </div>
-                </div>
-
-                {chesscomError && (
-                  <p className="text-xs text-red-600 dark:text-red-400 font-medium">{chesscomError}</p>
                 )}
 
-                {/* List of Retrieved Games */}
-                {chesscomGames.length > 0 && (
-                  <div className="flex flex-col gap-2 mt-1">
-                    <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">
-                      Recent games for <strong>{chesscomUsername}</strong>:
-                    </span>
-                    <div className="max-h-[240px] overflow-y-auto flex flex-col gap-2 pr-1">
-                      {chesscomGames.map((game) => {
-                        const isCurrentActive = activeGameId === game.id;
-                        return (
-                          <div
-                            key={game.id}
-                            className={`p-2.5 rounded-lg border text-xs flex flex-col gap-1 transition-all ${
-                              isCurrentActive
-                                ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 ring-1 ring-blue-500'
-                                : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 hover:border-zinc-300 dark:hover:border-zinc-700'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
-                                ⚪ {game.white.username} ({game.white.rating}) vs ⚫ {game.black.username} ({game.black.rating})
-                              </span>
-                              <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
-                                {game.timeClass}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
-                              <span>
-                                {game.date} • <strong className="text-zinc-700 dark:text-zinc-300">{game.outcome}</strong>
-                              </span>
-                              <button
-                                onClick={() => loadChesscomGame(game)}
-                                className={`px-2 py-0.5 rounded font-semibold transition-colors ${
-                                  isCurrentActive
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-zinc-200 dark:bg-zinc-800 hover:bg-blue-600 hover:text-white text-zinc-800 dark:text-zinc-200'
-                                }`}
-                              >
-                                {isCurrentActive ? '✓ Active' : 'Analyze'}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
+                {/* TAB 1: PGN Text Input */}
+                {activeTab === 'pgn' && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                        Paste PGN
+                      </label>
+                      <button
+                        onClick={() => {
+                          setPgnText(SAMPLE_PGN);
+                          loadPgnString(SAMPLE_PGN);
+                        }}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium cursor-pointer"
+                      >
+                        Load Morphy Opera Game
+                      </button>
                     </div>
 
-                    {/* Load More Button */}
-                    {chesscomHasMore && (
-                      <button
-                        onClick={() => fetchChesscomGames(true)}
-                        disabled={chesscomLoading}
-                        className="w-full py-1.5 mt-1 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1"
-                      >
-                        {chesscomLoading ? 'Importing more...' : '⬇ Import 5 More Games'}
-                      </button>
+                    <textarea
+                      rows={3}
+                      value={pgnText}
+                      onChange={(e) => setPgnText(e.target.value)}
+                      placeholder="Paste PGN here..."
+                      className="w-full text-xs font-mono p-2 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950"
+                    />
+
+                    {errorMsg && (
+                      <p className="text-xs text-red-600 dark:text-red-400 font-medium">{errorMsg}</p>
+                    )}
+
+                    <button
+                      onClick={() => loadPgnString(pgnText)}
+                      className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
+                    >
+                      Load PGN
+                    </button>
+                  </div>
+                )}
+
+                {/* TAB 2: Chess.com Profile Import */}
+                {activeTab === 'chesscom' && (
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1 block">
+                        Chess.com Username
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={chesscomUsername}
+                          onChange={(e) => setChesscomUsername(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && fetchChesscomGames(false)}
+                          placeholder="e.g. hikaru, magnuscarlsen"
+                          className="flex-1 text-xs px-2.5 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950"
+                        />
+                        <button
+                          onClick={() => fetchChesscomGames(false)}
+                          disabled={chesscomLoading}
+                          className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
+                        >
+                          {chesscomLoading ? 'Loading...' : 'Fetch'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {chesscomError && (
+                      <p className="text-xs text-red-600 dark:text-red-400 font-medium">{chesscomError}</p>
+                    )}
+
+                    {/* List of Retrieved Games */}
+                    {chesscomGames.length > 0 && (
+                      <div className="flex flex-col gap-2 mt-1">
+                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">
+                          Recent games for <strong>{chesscomUsername}</strong>:
+                        </span>
+                        <div className="max-h-[240px] overflow-y-auto flex flex-col gap-2 pr-1">
+                          {chesscomGames.map((game) => {
+                            const isCurrentActive = activeGameId === game.id;
+                            return (
+                              <div
+                                key={game.id}
+                                className={`p-2.5 rounded-lg border text-xs flex flex-col gap-1 transition-all ${
+                                  isCurrentActive
+                                    ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 ring-1 ring-blue-500'
+                                    : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 hover:border-zinc-300 dark:hover:border-zinc-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+                                    ⚪ {game.white.username} ({game.white.rating}) vs ⚫ {game.black.username} ({game.black.rating})
+                                  </span>
+                                  <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+                                    {game.timeClass}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  <span>
+                                    {game.date} • <strong className="text-zinc-700 dark:text-zinc-300">{game.outcome}</strong>
+                                  </span>
+                                  <button
+                                    onClick={() => loadChesscomGame(game)}
+                                    className={`px-2 py-0.5 rounded font-semibold transition-colors cursor-pointer ${
+                                      isCurrentActive
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-zinc-200 dark:bg-zinc-800 hover:bg-blue-600 hover:text-white text-zinc-800 dark:text-zinc-200'
+                                    }`}
+                                  >
+                                    {isCurrentActive ? '✓ Active' : 'Analyze'}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Load More Button */}
+                        {chesscomHasMore && (
+                          <button
+                            onClick={() => fetchChesscomGames(true)}
+                            disabled={chesscomLoading}
+                            className="w-full py-1.5 mt-1 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            {chesscomLoading ? 'Importing more...' : '⬇ Import 5 More Games'}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
