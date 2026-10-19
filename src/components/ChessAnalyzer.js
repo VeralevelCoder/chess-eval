@@ -433,6 +433,147 @@ function generateCommentary(move, prevEval, currEval, classification, playerName
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Generate a human-like game summary from Stockfish eval data — no LLM needed.
+// Called after full-game analysis completes, using a local cache snapshot.
+// ─────────────────────────────────────────────────────────────────────────────
+function generateGameSummary({ moves, evalCache, moveClassifications, gameHeaders, gameTermination }) {
+  const white = gameHeaders.White || 'White';
+  const black = gameHeaders.Black || 'Black';
+  const eco   = gameHeaders.ECO || '';
+  const opening = gameHeaders.Opening || eco || 'this opening';
+  const result  = gameHeaders.Result || '*';
+  const event   = (gameHeaders.Event || '').replace(/\?/g, '').trim();
+  const date    = (gameHeaders.Date  || '').replace(/\.\?\?/g, '').replace(/\?/g, '').trim();
+
+  // ── Collect per-player stats & key moments ──────────────────────────────
+  const whiteStats = { blunder: 0, mistake: 0, inaccuracy: 0, best: 0, excellent: 0, good: 0 };
+  const blackStats = { blunder: 0, mistake: 0, inaccuracy: 0, best: 0, excellent: 0, good: 0 };
+  const keyMoments = [];
+
+  for (let i = 1; i <= moves.length; i++) {
+    const cls  = moveClassifications[i];
+    const move = moves[i - 1];
+    if (!cls || cls.type === 'evaluating' || cls.type === 'checkmate') continue;
+
+    const prev  = evalCache[i - 1];
+    const curr  = evalCache[i];
+    const stats = move.isWhite ? whiteStats : blackStats;
+
+    if (['best', 'excellent'].includes(cls.type)) stats.best++;
+    else if (cls.type === 'good')       stats.good++;
+    else if (cls.type === 'inaccuracy') stats.inaccuracy++;
+    else if (cls.type === 'mistake')    stats.mistake++;
+    else if (cls.type === 'blunder')    stats.blunder++;
+
+    if (['blunder', 'mistake', 'inaccuracy'].includes(cls.type)) {
+      const rawLoss   = prev && curr ? Math.abs(curr.value - prev.value) / 100 : null;
+      const evalLoss  = rawLoss !== null ? rawLoss.toFixed(1) : null;
+      keyMoments.push({
+        index:      i,
+        type:       cls.type,
+        label:      cls.label,
+        icon:       cls.icon,
+        player:     move.isWhite ? white : black,
+        isWhite:    move.isWhite,
+        san:        move.san,
+        moveNumber: move.moveNumber,
+        evalLoss,
+        prevScore:  prev ? prev.scoreText : null,
+        currScore:  curr ? curr.scoreText : null,
+      });
+    }
+  }
+
+  // ── Build narrative paragraphs ───────────────────────────────────────────
+  const paragraphs = [];
+  const whiteTotalErrors = whiteStats.blunder + whiteStats.mistake + whiteStats.inaccuracy;
+  const blackTotalErrors = blackStats.blunder + blackStats.mistake + blackStats.inaccuracy;
+  const totalHalfMoves   = moves.length;
+
+  // Paragraph 1 — Context
+  let p1 = '';
+  if (eco) {
+    p1 = `This was a ${eco} (${opening}) between ${white} (White) and ${black} (Black)`;
+  } else {
+    p1 = `This was a game between ${white} (White) and ${black} (Black)`;
+  }
+  if (event && event !== 'Casual Game' && event.length > 0) p1 += ` played at ${event}`;
+  if (date && date.length > 0) p1 += ` in ${date}`;
+  p1 += '.';
+  paragraphs.push(p1);
+
+  // Paragraph 2 — Overall flow
+  const moveWord = Math.ceil(totalHalfMoves / 2);
+  let p2 = `Over ${moveWord} move${moveWord !== 1 ? 's' : ''}, `;
+  if (whiteTotalErrors === 0 && blackTotalErrors === 0) {
+    p2 += `both players navigated the position with remarkable precision — the engine found no outright blunders or mistakes from either side.`;
+  } else if (whiteTotalErrors < blackTotalErrors) {
+    const diff = blackTotalErrors - whiteTotalErrors;
+    p2 += `${white} played the more disciplined game, while ${black} committed ${blackStats.blunder > 0 ? `${blackStats.blunder} critical blunder${blackStats.blunder > 1 ? 's' : ''}` : 'several significant errors'} that progressively ceded the initiative.`;
+  } else if (blackTotalErrors < whiteTotalErrors) {
+    p2 += `${black} held up better under pressure, while ${white} gave away the advantage through ${whiteStats.blunder > 0 ? `${whiteStats.blunder} critical blunder${whiteStats.blunder > 1 ? 's' : ''}` : 'a series of inaccuracies'} that shifted the tide.`;
+  } else {
+    p2 += `both players traded errors in roughly equal measure — ${whiteTotalErrors} for ${white} and ${blackTotalErrors} for ${black} — making for a tense, hard-fought struggle.`;
+  }
+  paragraphs.push(p2);
+
+  // Paragraph 3 — Critical moments in prose
+  const blunders  = keyMoments.filter(m => m.type === 'blunder');
+  const mistakes  = keyMoments.filter(m => m.type === 'mistake');
+  const p3Lines   = [];
+
+  blunders.slice(0, 3).forEach(m => {
+    const swing = m.evalLoss ? ` — a swing of ${m.evalLoss} pawn${parseFloat(m.evalLoss) !== 1 ? 's' : ''} (${m.prevScore} → ${m.currScore})` : '';
+    p3Lines.push(`${m.player}'s ${m.san} on move ${m.moveNumber} proved to be a critical blunder${swing}.`);
+  });
+
+  if (blunders.length === 0 && mistakes.length > 0) {
+    mistakes.slice(0, 2).forEach(m => {
+      const swing = m.evalLoss ? ` (dropped ${m.evalLoss} pawns)` : '';
+      p3Lines.push(`${m.player} made a notable mistake with ${m.san} on move ${m.moveNumber}${swing}.`);
+    });
+  } else if (blunders.length > 0 && blunders.length < 3 && mistakes.length > 0) {
+    mistakes.slice(0, 1).forEach(m => {
+      const swing = m.evalLoss ? ` (dropped ${m.evalLoss} pawns)` : '';
+      p3Lines.push(`${m.player} also erred with ${m.san} on move ${m.moveNumber}${swing}.`);
+    });
+  }
+
+  if (p3Lines.length > 0) {
+    paragraphs.push(p3Lines.join(' '));
+  } else if (whiteTotalErrors === 0 && blackTotalErrors === 0) {
+    // already covered in p2 — skip duplicate
+  } else {
+    paragraphs.push(`Only minor inaccuracies were found — neither player made a game-changing blunder.`);
+  }
+
+  // Paragraph 4 — Outcome
+  if (gameTermination) {
+    paragraphs.push(gameTermination.description);
+  } else if (result === '1-0') {
+    paragraphs.push(`${white} prevailed (1-0).`);
+  } else if (result === '0-1') {
+    paragraphs.push(`${black} prevailed (0-1).`);
+  } else if (result === '1/2-1/2') {
+    paragraphs.push(`The game concluded as a draw (½-½).`);
+  }
+
+  // ── Sort key moments: blunders → mistakes → inaccuracies ────────────────
+  const priority = { blunder: 0, mistake: 1, inaccuracy: 2 };
+  const topMoments = [...keyMoments]
+    .sort((a, b) => priority[a.type] - priority[b.type])
+    .slice(0, 6);
+
+  return {
+    paragraphs,
+    topMoments,
+    stats:   { white: whiteStats, black: blackStats },
+    players: { white, black },
+    result,
+  };
+}
+
 export default function ChessAnalyzer({
   initialPgn,
   onBackToHome,
@@ -484,6 +625,10 @@ export default function ChessAnalyzer({
   const [showPlayedMoveArrow, setShowPlayedMoveArrow] = useState(true);
   const [showAlternativeArrow, setShowAlternativeArrow] = useState(true);
   const [previewState, setPreviewState] = useState(null); // { fen, moveSan, from, to, description }
+
+  // Game Summary Modal — shown automatically after Auto-Analyze completes
+  const [showGameSummary, setShowGameSummary]   = useState(false);
+  const [gameSummaryData, setGameSummaryData]   = useState(null);
 
   const { isReady, evaluating, evaluation, evaluatePosition, evaluatePositionAsync, stop } = useStockfish();
 
@@ -578,6 +723,8 @@ export default function ChessAnalyzer({
         setIsAnalyzingAll(false);
         setActiveGameId(data.gameId);
         setAnalyzerLinkInput('');
+        setShowGameSummary(false);
+        setGameSummaryData(null);
       } else {
         setAnalyzerLinkError('No move notation could be loaded for this game.');
       }
@@ -634,6 +781,8 @@ export default function ChessAnalyzer({
       setErrorMsg('');
       setIsAnalyzingAll(false);
       setActiveGameId(gameId);
+      setShowGameSummary(false);
+      setGameSummaryData(null);
     } catch (err) {
       console.error('Failed to parse PGN:', err);
       setErrorMsg('Invalid PGN format. Please verify the move notation.');
@@ -1005,8 +1154,15 @@ export default function ChessAnalyzer({
     setIsAnalyzingAll(true);
     cancelAnalysisRef.current = false;
 
-    if (!evalCache[0]) {
+    // ── localCache: a plain JS object kept in sync during the loop.
+    // React's setEvalCache is async, so evalCache state can't be read back
+    // immediately after updates. We use localCache to pass accurate data to
+    // generateGameSummary without waiting for React to re-render.
+    const localCache = { ...evalCache };
+
+    if (!localCache[0]) {
       const startRes = await evaluatePositionAsync(START_FEN, 10);
+      localCache[0] = startRes;
       setEvalCache((prev) => ({ ...prev, [0]: startRes }));
     }
 
@@ -1014,14 +1170,51 @@ export default function ChessAnalyzer({
       if (cancelAnalysisRef.current) break;
       setAnalysisProgress({ current: i, total: moves.length });
 
-      if (!evalCache[i]) {
+      if (!localCache[i]) {
         const fen = moves[i - 1].fen;
         const res = await evaluatePositionAsync(fen, 10);
-        setEvalCache((prev) => ({ ...prev, [i]: res }));
+        localCache[i] = res;                                       // keep local copy in sync
+        setEvalCache((prev) => ({ ...prev, [i]: res }));           // update UI state
       }
     }
 
     setIsAnalyzingAll(false);
+
+    // ── Only show summary if the user didn't cancel ──────────────────────
+    if (!cancelAnalysisRef.current) {
+      // Rebuild classifications synchronously from the local cache snapshot
+      // (mirrors the moveClassifications useMemo logic exactly)
+      const localClassifications = {};
+      for (let i = 1; i <= moves.length; i++) {
+        const prev = localCache[i - 1];
+        const curr = localCache[i];
+        const move = moves[i - 1];
+        if (!prev || !curr) continue;
+
+        const isDeliveredCheckmate = curr.type === 'mate' && curr.value === 0;
+        const isCheckmate = curr.type === 'mate' || prev.type === 'mate';
+
+        if (curr.type === 'mate' && prev.type !== 'mate') {
+          const isWhiteMating = curr.value > 0;
+          const playerMated   = move.isWhite ? isWhiteMating : !isWhiteMating;
+          localClassifications[i] = classifyMove(playerMated ? 0 : 500, true, playerMated, curr.bestMove, move.san);
+        } else {
+          const evalDiff = curr.value - prev.value;
+          const evalLoss = move.isWhite ? -evalDiff : evalDiff;
+          localClassifications[i] = classifyMove(evalLoss, isCheckmate, isDeliveredCheckmate, curr.bestMove, move.san);
+        }
+      }
+
+      const summary = generateGameSummary({
+        moves,
+        evalCache:           localCache,
+        moveClassifications: localClassifications,
+        gameHeaders,
+        gameTermination,
+      });
+      setGameSummaryData(summary);
+      setShowGameSummary(true);
+    }
   };
 
   const cancelFullGameAnalysis = () => {
@@ -1171,6 +1364,7 @@ export default function ChessAnalyzer({
   }
 
   return (
+    <>
     <div className="w-full max-w-6xl mx-auto px-4 py-6">
       {/* Top Banner / Status & Navigation Controls */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-200 dark:border-zinc-800">
@@ -1364,7 +1558,7 @@ export default function ChessAnalyzer({
 
           {/* Quick Blunder Jumper & Progress */}
           <button
-            onClick={handleAutoAnalyze}
+            onClick={runFullGameAnalysis}
             className="px-3 py-1.5 text-xs font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-xs flex items-center gap-1.5"
           >
             Analyze Game
@@ -2021,5 +2215,173 @@ export default function ChessAnalyzer({
         </div>
       </div>
     </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          Game Analysis Summary Modal
+          Appears automatically after "Auto-Analyze Full Game" completes.
+          Backdrop click or ✕ or "Continue Analysis" button closes it.
+          ═══════════════════════════════════════════════════════════════════ */}
+      {showGameSummary && gameSummaryData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backdropFilter: 'blur(4px)', backgroundColor: 'rgba(0,0,0,0.55)' }}
+          onClick={() => setShowGameSummary(false)}
+        >
+          {/* Card — stop click propagation so backdrop click doesn't close when clicking inside */}
+          <div
+            className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+
+            {/* ── Header ──────────────────────────────────────────────────── */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/30 rounded-t-2xl flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl select-none">🏆</span>
+                <div>
+                  <h2 className="text-base font-extrabold text-zinc-900 dark:text-zinc-50 tracking-tight leading-tight">
+                    Game Analysis Summary
+                  </h2>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    {gameSummaryData.players.white} vs {gameSummaryData.players.black}
+                    <span className="mx-1 opacity-40">•</span>
+                    {gameSummaryData.result}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGameSummary(false)}
+                style={{ touchAction: 'manipulation' }}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-700 transition-colors text-sm font-bold flex-shrink-0"
+                title="Close summary"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* ── Scrollable Body ──────────────────────────────────────────── */}
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+
+              {/* Narrative paragraphs */}
+              <div className="space-y-2.5">
+                {gameSummaryData.paragraphs.map((para, idx) => (
+                  <p key={idx} className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                    {para}
+                  </p>
+                ))}
+              </div>
+
+              {/* Per-player stat cards */}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: gameSummaryData.players.white, icon: '⚪', stats: gameSummaryData.stats.white },
+                  { label: gameSummaryData.players.black, icon: '⚫', stats: gameSummaryData.stats.black },
+                ].map(({ label, icon, stats }) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 p-3 flex flex-col gap-2"
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="text-sm">{icon}</span>
+                      <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">{label}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {stats.blunder > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                          🚨 {stats.blunder} Blunder{stats.blunder > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {stats.mistake > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
+                          ❌ {stats.mistake} Mistake{stats.mistake > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {stats.inaccuracy > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                          ⚠️ {stats.inaccuracy} Inaccurac{stats.inaccuracy > 1 ? 'ies' : 'y'}
+                        </span>
+                      )}
+                      {(stats.best + stats.excellent) > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          🌟 {stats.best + stats.excellent} Best/Excellent
+                        </span>
+                      )}
+                      {stats.good > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          👍 {stats.good} Good
+                        </span>
+                      )}
+                      {stats.blunder === 0 && stats.mistake === 0 && stats.inaccuracy === 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          ✨ Clean game!
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Key Moments list */}
+              {gameSummaryData.topMoments.length > 0 && (
+                <div>
+                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-2">
+                    📌 Key Moments
+                  </h3>
+                  <div className="space-y-2">
+                    {gameSummaryData.topMoments.map((m, idx) => {
+                      const colors = {
+                        blunder:   { bg: 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800',    text: 'text-red-800 dark:text-red-300'    },
+                        mistake:   { bg: 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800', text: 'text-orange-800 dark:text-orange-300' },
+                        inaccuracy:{ bg: 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800',   text: 'text-amber-800 dark:text-amber-300'  },
+                      };
+                      const c = colors[m.type] || { bg: 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700', text: 'text-zinc-700 dark:text-zinc-300' };
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex items-start gap-3 px-3 py-2.5 rounded-lg border ${c.bg}`}
+                        >
+                          <span className="text-base leading-none mt-0.5 flex-shrink-0 select-none">{m.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-sm font-semibold ${c.text}`}>
+                              {m.player}
+                              <span className="mx-1 opacity-50">·</span>
+                              Move {m.moveNumber}:
+                              <span className="font-mono ml-1">{m.san}</span>
+                              <span className="ml-1.5 text-[11px] font-medium opacity-60">({m.label})</span>
+                            </div>
+                            {m.evalLoss && m.prevScore && m.currScore && (
+                              <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                Eval swung by {m.evalLoss} pawn{parseFloat(m.evalLoss) !== 1 ? 's' : ''}
+                                <span className="mx-1 opacity-40">·</span>
+                                {m.prevScore} → {m.currScore}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Footer ──────────────────────────────────────────────────── */}
+            <div className="flex-shrink-0 px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3 bg-zinc-50/80 dark:bg-zinc-900/80 rounded-b-2xl">
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 italic hidden sm:block">
+                Tap any move in the list to explore it in depth.
+              </p>
+              <button
+                onClick={() => setShowGameSummary(false)}
+                style={{ touchAction: 'manipulation' }}
+                className="ml-auto px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-bold transition-colors shadow-sm flex items-center gap-2 select-none"
+              >
+                Continue Analysis <span className="opacity-75">→</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+    </>
   );
 }

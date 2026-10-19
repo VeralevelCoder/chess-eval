@@ -110,6 +110,13 @@
 * **Accuracy Breakdown:** Displays counts of Best, Good, Inaccuracies, Mistakes, and Blunders for both White and Black.
 * **Interactive Move List:** Moves are annotated with classification symbols (`★`, `!`, `✓`, `?!`, `?`, `??`, `#`) and cached evaluation scores.
 * **Quick Blunder Jumper:** `⏪ Prev Blunder` and `Next Blunder ⏩` buttons let you jump straight to pivotal mistakes.
+* **🏆 Game Analysis Summary (Post-Analysis Pop-up):**
+  * Automatically appears once full analysis completes.
+  * Displays a **human-like narrative** (3–4 paragraphs) — opening context, game flow, critical blunders called out by player/move/centipawn swing, and the game outcome — all generated from Stockfish eval data, no LLM.
+  * **Per-player stat pills**: Blunders 🚨, Mistakes ❌, Inaccuracies ⚠️, Best/Excellent 🌟, Good 👍.
+  * **📌 Key Moments list**: Up to 6 most critical moments sorted by severity (blunders → mistakes → inaccuracies) with eval swing details.
+  * Dismissable via ✕, backdrop click, or **Continue Analysis →** button.
+  * Resets automatically when a new game is loaded.
 
 ---
 
