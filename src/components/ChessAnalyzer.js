@@ -1555,14 +1555,7 @@ export default function ChessAnalyzer({
               ▶|
             </button>
           </div>
-
           {/* Quick Blunder Jumper & Progress */}
-          <button
-            onClick={runFullGameAnalysis}
-            className="px-3 py-1.5 text-xs font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 transition-colors shadow-xs flex items-center gap-1.5"
-          >
-            Analyze Game
-          </button>`
           <div className="flex items-center justify-between gap-2 mt-2 w-full max-w-[500px] text-xs">
             <button
               onClick={goToPrevBlunder}
@@ -1580,7 +1573,6 @@ export default function ChessAnalyzer({
               Next Blunder ⏩
             </button>
           </div>
-
           {/* Guide Lines & Visual Suggestions Toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-2 mt-3 w-full max-w-[500px] p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-xs transition-colors">
             <div className="flex items-center gap-1.5 font-bold text-zinc-700 dark:text-zinc-300">
