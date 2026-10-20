@@ -43,6 +43,10 @@ export default function useStockfish() {
 
     workerRef.current = worker;
 
+    worker.onerror = (err) => {
+      console.warn('Stockfish worker error:', err);
+    };
+
     worker.onmessage = (event) => {
       const line = typeof event.data === 'string' ? event.data : '';
 

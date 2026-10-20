@@ -14,7 +14,7 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
       <body className="min-h-full flex flex-col">
         {children}
         <Analytics />

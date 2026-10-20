@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Chess } from 'chess.js';
 import { Chessboard, defaultArrowOptions } from 'react-chessboard';
 import useStockfish from '../hooks/useStockfish';
-import { Analytics } from "@vercel/analytics/next";
 import { analyzeLast6Games } from '../utils/recentGamesAnalysis';
 import RecentGamesReviewModal from './RecentGamesReviewModal';
 
@@ -897,14 +896,20 @@ export default function ChessAnalyzer({
   useEffect(() => {
     setIsMounted(true);
     if (externalIsDark === undefined) {
-      const savedTheme = localStorage.getItem('chess-eval-theme');
-      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const initialDark = savedTheme ? savedTheme === 'dark' : prefersDark;
-      setInternalIsDark(initialDark);
-      if (initialDark) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
+      try {
+        const savedTheme = typeof window !== 'undefined' ? localStorage.getItem('chess-eval-theme') : null;
+        const prefersDark = typeof window !== 'undefined' && window.matchMedia
+          ? Boolean(window.matchMedia('(prefers-color-scheme: dark)')?.matches)
+          : false;
+        const initialDark = savedTheme ? savedTheme === 'dark' : prefersDark;
+        setInternalIsDark(initialDark);
+        if (initialDark) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      } catch (err) {
+        console.warn('Theme init fallback:', err);
       }
     }
   }, [externalIsDark]);
@@ -916,7 +921,11 @@ export default function ChessAnalyzer({
     }
     setInternalIsDark((prev) => {
       const next = !prev;
-      localStorage.setItem('chess-eval-theme', next ? 'dark' : 'light');
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('chess-eval-theme', next ? 'dark' : 'light');
+        }
+      } catch {}
       if (next) {
         document.documentElement.classList.add('dark');
       } else {
@@ -1870,7 +1879,6 @@ export default function ChessAnalyzer({
 
   return (
     <>
-    <Analytics />
     <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 overflow-x-hidden">
       {/* Top Banner / Status & Navigation Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-4 sm:mb-6 pb-4 border-b border-zinc-200 dark:border-zinc-800 w-full">
